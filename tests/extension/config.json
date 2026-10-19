@@ -66,6 +66,10 @@
             }, {
                 "type": "cut/copy/paste"
             }, {
+                "type": "media: play, pause, etc."
+            }, {
+                "type": "light-mode/dark-mode"
+            }, {
                 "type": "highlight"
             }, {
                 "type": "checkbox"
