@@ -2,7 +2,90 @@
     "configuration_url": "config.json",
     "identifier": "rex-page-events-test",
     "page_events": {
-        "enabled": true
+        "enabled": true,
+        "sites": [{
+            "id": "google",
+            "patterns": ["*.google.com"],
+            "events": [{
+                "type": "click",
+                "targets": ["a[href]"],
+                "payload": {
+                    "click-type": "link",
+                    "link-content": "element.text"
+                }
+            }, {
+                "type": "click",
+                "targets": ["button.buy_now"],
+                "payload": {
+                    "click-type": "purchase-button",
+                    "link-content": "element.image"
+                }
+            }, {
+                "type": "secondary-click",
+                "targets": [],
+                "payload": {
+                }
+            }, {
+                "type": "scroll",
+                "pause_delay": 250,
+                "payload": {
+                }
+            }, {
+                "type": "load",
+                "payload": {
+                    "url": "page.href"
+                }
+            }, {
+                "type": "unload",
+                "payload": {
+                    "url": "page.href"
+                }
+            }, {
+                "type": "text-entry",
+                "targets": [".input-field"],
+                "record": ["content", "text-size"],
+                "payload": {
+                }
+            }, {
+                "type": "mouse-movement",
+                "pause_delay": 250,
+                "payload": {
+                }
+            }, {
+                "type": "zoom",
+                "targets": [".map-widget"],
+                "payload": {
+                }
+            }, {
+                "type": "drag",
+                "targets": ["img.draggable"],
+                "payload": {
+                }
+            }, {
+                "type": "highlight"
+            }, {
+                "type": "cut/copy/paste"
+            }, {
+                "type": "highlight"
+            }, {
+                "type": "checkbox"
+            }, {
+                "type": "radio"
+            }, {
+                "type": "select"
+            }, {
+                "type": "location"
+            }, {
+                "type": "sensor[s]"
+            }, {
+                "type": "frame-load"
+            }, {
+                "type": "change",
+                "targets": [".search-container"],
+                "payload": {
+                }
+            }]
+        }]
     },
     "ui": [{
         "title": "REX Page Events Test Extension",
