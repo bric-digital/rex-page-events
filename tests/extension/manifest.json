@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Test extension for rex-page-events.",
   "permissions": [
+    "scripting",
     "storage",
     "tabs"
   ],

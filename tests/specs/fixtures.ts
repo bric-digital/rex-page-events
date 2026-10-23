@@ -45,3 +45,49 @@ export const test = base.extend<{
 });
 
 export const expect = test.expect;
+
+export const BASE_CONFIG = {
+  configuration_url: 'config.json',
+  identifier: 'rex-page-events-test',
+  page_events: {
+    enabled: true,
+  },
+  ui: [{
+    title: 'Test',
+    identifier: 'main',
+    default: true,
+  }],
+}
+
+export async function loadConfig(serviceWorker, config) {
+  return serviceWorker.evaluate(async (configArg) => {
+    return new Promise((resolve) => {
+      self.rexCorePlugin.handleMessage({
+        messageType: 'loadInitialConfiguration',
+        configuration: configArg,
+      }, this, (response) => resolve(response))
+    })
+  }, config)
+}
+
+export async function waitForPageEventsConfig(serviceWorker) {
+  await serviceWorker.evaluate(async () => {
+    return new Promise((resolve) => {
+      const check = () => {
+        if (self.rexPageEventsPlugin?.config) {
+          resolve()
+        } else {
+          setTimeout(check, 100)
+        }
+      }
+      check()
+    })
+  })
+}
+
+export async function resetCaptured(serviceWorker) {
+  await serviceWorker.evaluate(() => {
+    self.__capturedEvents = []
+    self.__capturedUrlActive = []
+  })
+}
