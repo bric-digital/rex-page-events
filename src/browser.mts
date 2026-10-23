@@ -29,7 +29,7 @@ const SCROLL_PAUSE_MS = 250
 function loadStartTime(): number {
   const [navigation] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
 
-  return performance.timeOrigin + navigation.loadEventStart
+  return Math.round(performance.timeOrigin + navigation.loadEventStart)
 }
 
 function scrollPosition(): ScrollPosition {

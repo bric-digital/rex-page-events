@@ -121,7 +121,12 @@ test.describe('REX Page Events in pages', () => {
     const loads = (await pageEventsOf(serviceWorker, 'load')).filter((event) => event.url === url)
 
     expect(loads.length).toBe(1)
+    expect(Number.isInteger(loads[0].date)).toBe(true)
     expect(Math.abs(loads[0].date - await loadStartOf(page))).toBeLessThanOrEqual(5)
+
+    const [start] = await scrollsOf(serviceWorker, url)
+
+    expect(start.date).toBeGreaterThan(loads[0].date)
   })
 
   test('a page still loading when the browser part arrives records load when it finishes', async ({ context, serviceWorker }) => {
@@ -143,7 +148,12 @@ test.describe('REX Page Events in pages', () => {
 
     const [load] = (await pageEventsOf(serviceWorker, 'load')).filter((event) => event.url === url)
 
+    expect(Number.isInteger(load.date)).toBe(true)
     expect(Math.abs(load.date - await loadStartOf(page))).toBeLessThanOrEqual(5)
+
+    const [start] = await scrollsOf(serviceWorker, url)
+
+    expect(start.date).toBeLessThan(load.date)
   })
 
   test('a page left before it finishes loading, and not cached, records no load', async ({ context, serviceWorker }) => {
@@ -269,6 +279,7 @@ test.describe('REX Page Events in pages', () => {
     })
     await page.waitForTimeout(500)
 
+    expect(await page.evaluate(() => document.getElementById('box').scrollTop)).toBe(1000)
     expect((await scrollsOf(serviceWorker, url)).length).toBe(1)
   })
 })
