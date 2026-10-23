@@ -28,6 +28,7 @@ type EventType =
   | 'page_hide'
   | 'tab_close'
   | 'window_close'
+  | 'load'
 
 interface PageEventsConfig {
   enabled: boolean

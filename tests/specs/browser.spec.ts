@@ -51,6 +51,14 @@ async function openTestPage(context, body, options = {}) {
   return { page, url, releaseImage }
 }
 
+async function loadStartOf(page) {
+  return page.evaluate(() => {
+    const [navigation] = performance.getEntriesByType('navigation')
+
+    return performance.timeOrigin + navigation.loadEventStart
+  })
+}
+
 async function pageEventsOf(serviceWorker, eventType) {
   return serviceWorker.evaluate((type) => {
     return self.__capturedEvents.filter((event) => event.event_type === type)
@@ -71,5 +79,73 @@ test.describe('REX Page Events in pages', () => {
 
       return hides.filter((event) => event.url === url).map((event) => event.persisted)
     }, { timeout: 5000 }).toEqual([false])
+  })
+
+  test('a page already loaded when the browser part arrives records one load at its load time', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, '<p>Loads at once</p>')
+
+    await page.waitForTimeout(SETTLE_MS)
+
+    const loads = (await pageEventsOf(serviceWorker, 'load')).filter((event) => event.url === url)
+
+    expect(loads.length).toBe(1)
+    expect(Math.abs(loads[0].date - await loadStartOf(page))).toBeLessThanOrEqual(5)
+  })
+
+  test('a page still loading when the browser part arrives records load when it finishes', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url, releaseImage } = await openTestPage(context, '<p>Waits for an image</p>', { holdImage: true })
+
+    await page.waitForTimeout(SETTLE_MS)
+
+    expect(await pageEventsOf(serviceWorker, 'load')).toEqual([])
+
+    releaseImage()
+
+    await expect.poll(async () => {
+      const loads = await pageEventsOf(serviceWorker, 'load')
+
+      return loads.filter((event) => event.url === url).length
+    }, { timeout: 5000 }).toBe(1)
+
+    const [load] = (await pageEventsOf(serviceWorker, 'load')).filter((event) => event.url === url)
+
+    expect(Math.abs(load.date - await loadStartOf(page))).toBeLessThanOrEqual(5)
+  })
+
+  test('a page left before it finishes loading records no load', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, '<p>Left while loading</p>', { holdImage: true })
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.goto(`${TEST_ORIGIN}/next`)
+
+    await expect.poll(async () => {
+      const hides = await pageEventsOf(serviceWorker, 'page_hide')
+
+      return hides.filter((event) => event.url === url).map((event) => event.persisted)
+    }, { timeout: 5000 }).toEqual([false])
+
+    const loads = (await pageEventsOf(serviceWorker, 'load')).filter((event) => event.url === url)
+
+    expect(loads).toEqual([])
+  })
+
+  test('a same-document navigation records no second load', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page } = await openTestPage(context, '<p>Changes its address</p>')
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.evaluate(() => {
+      history.pushState({}, '', '/same-document')
+    })
+    await page.waitForTimeout(1000)
+
+    expect((await pageEventsOf(serviceWorker, 'load')).length).toBe(1)
   })
 })

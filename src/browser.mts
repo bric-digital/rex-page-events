@@ -1,6 +1,6 @@
 import { REXClientModule, registerREXModule } from '@bric/rex-core/browser'
 
-type BrowserEventType = 'page_show' | 'page_hide' | 'tab_focus' | 'tab_blur'
+type BrowserEventType = 'page_show' | 'page_hide' | 'tab_focus' | 'tab_blur' | 'load'
 
 interface PageEventMessage {
   messageType: 'pageEvent'
@@ -11,6 +11,12 @@ interface PageEventMessage {
   persisted?: boolean
 }
 
+function loadStartTime(): number {
+  const [navigation] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
+
+  return performance.timeOrigin + navigation.loadEventStart
+}
+
 class REXPageEventsModule extends REXClientModule {
   toString(): string {
     return 'REXPageEventsModule'
@@ -18,6 +24,8 @@ class REXPageEventsModule extends REXClientModule {
 
   setup() {
     console.log('[rex-page-events] browser setup')
+
+    this.recordLoad()
 
     window.addEventListener('pageshow', (event: PageTransitionEvent) => {
       this.send({
@@ -60,6 +68,24 @@ class REXPageEventsModule extends REXClientModule {
         timestamp: Date.now(),
       })
     })
+  }
+
+  private recordLoad(): void {
+    const sendLoad = () => {
+      this.send({
+        messageType: 'pageEvent',
+        event_type: 'load',
+        url: location.href,
+        title: document.title,
+        timestamp: loadStartTime(),
+      })
+    }
+
+    if (document.readyState === 'complete') {
+      sendLoad()
+    } else {
+      window.addEventListener('load', sendLoad, { once: true })
+    }
   }
 
   private send(message: PageEventMessage): void {
