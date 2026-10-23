@@ -65,8 +65,38 @@ async function pageEventsOf(serviceWorker, eventType) {
   }, eventType)
 }
 
+const TALL_PAGE = '<div style="height: 5000px">Tall page</div>'
+
+async function capturedEvents(serviceWorker) {
+  return serviceWorker.evaluate(() => self.__capturedEvents)
+}
+
+async function scrollsOf(serviceWorker, url) {
+  return (await pageEventsOf(serviceWorker, 'scroll')).filter((event) => event.url === url)
+}
+
+async function positionOf(page) {
+  return page.evaluate(() => ({
+    top: window.scrollY,
+    left: window.scrollX,
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+    document_height: document.documentElement.scrollHeight,
+  }))
+}
+
+function positionFields(event) {
+  return {
+    top: event.top,
+    left: event.left,
+    width: event.width,
+    height: event.height,
+    document_height: event.document_height,
+  }
+}
+
 test.describe('REX Page Events in pages', () => {
-  test('navigating away records page_hide with persisted false (the unload, D63)', async ({ context, serviceWorker }) => {
+  test('leaving a page the browser does not cache records page_hide with persisted false', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker)
 
     const { page, url } = await openTestPage(context, '<p>First page</p>')
@@ -116,7 +146,7 @@ test.describe('REX Page Events in pages', () => {
     expect(Math.abs(load.date - await loadStartOf(page))).toBeLessThanOrEqual(5)
   })
 
-  test('a page left before it finishes loading records no load', async ({ context, serviceWorker }) => {
+  test('a page left before it finishes loading, and not cached, records no load', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker)
 
     const { page, url } = await openTestPage(context, '<p>Left while loading</p>', { holdImage: true })
@@ -147,5 +177,145 @@ test.describe('REX Page Events in pages', () => {
     await page.waitForTimeout(1000)
 
     expect((await pageEventsOf(serviceWorker, 'load')).length).toBe(1)
+  })
+
+  test('the starting scroll position is recorded', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, TALL_PAGE)
+
+    await page.waitForTimeout(SETTLE_MS)
+
+    const scrolls = await scrollsOf(serviceWorker, url)
+
+    expect(scrolls.length).toBe(1)
+    expect(positionFields(scrolls[0])).toEqual(await positionOf(page))
+    expect(scrolls[0].top).toBe(0)
+  })
+
+  test('scrolling records one position per pause and none while it continues', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, TALL_PAGE)
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.mouse.move(200, 200)
+
+    for (let step = 0; step < 10; step += 1) {
+      await page.mouse.wheel(0, 100)
+      await page.waitForTimeout(100)
+    }
+
+    expect((await scrollsOf(serviceWorker, url)).length).toBe(1)
+
+    await page.waitForTimeout(500)
+
+    const scrolls = await scrollsOf(serviceWorker, url)
+
+    expect(scrolls.length).toBe(2)
+    expect(scrolls[1].top).toBe((await positionOf(page)).top)
+    expect(scrolls[1].top).toBeGreaterThan(0)
+  })
+
+  test('leaving the page during a pause records the position at once (D60)', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, TALL_PAGE)
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.evaluate(() => {
+      window.scrollTo(0, 1200)
+    })
+    await page.goto(`${TEST_ORIGIN}/next`)
+
+    await expect.poll(async () => {
+      const scrolls = await scrollsOf(serviceWorker, url)
+
+      return scrolls.map((event) => event.top)
+    }, { timeout: 5000 }).toEqual([0, 1200])
+
+    const events = await capturedEvents(serviceWorker)
+    const leftAt = events.findIndex((event) => event.event_type === 'page_hide' && event.url === url)
+    const lastScrollAt = events.findLastIndex((event) => event.event_type === 'scroll' && event.url === url)
+
+    expect(leftAt).toBeGreaterThan(lastScrollAt)
+  })
+
+  test('a page too short to scroll records only its starting position', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, '<p>Short page</p>')
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.mouse.move(200, 200)
+    await page.mouse.wheel(0, 500)
+    await page.waitForTimeout(500)
+
+    const scrolls = await scrollsOf(serviceWorker, url)
+
+    expect(scrolls.length).toBe(1)
+    expect(scrolls[0].document_height).toBeLessThanOrEqual(scrolls[0].height)
+  })
+
+  test('scrolling inside a box records nothing', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const box = '<div id="box" style="height: 300px; overflow: auto"><div style="height: 3000px">Inside the box</div></div>'
+    const { page, url } = await openTestPage(context, box)
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.evaluate(() => {
+      document.getElementById('box').scrollTop = 1000
+    })
+    await page.waitForTimeout(500)
+
+    expect((await scrollsOf(serviceWorker, url)).length).toBe(1)
+  })
+})
+
+test.describe('REX Page Events in pages the browser caches', () => {
+  test.use({ backForwardCache: true })
+
+  test('leaving a page the browser caches records page_hide with persisted true', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, '<p>Cached page</p>')
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.goto(`${TEST_ORIGIN}/next`)
+
+    await expect.poll(async () => {
+      const hides = await pageEventsOf(serviceWorker, 'page_hide')
+
+      return hides.filter((event) => event.url === url).map((event) => event.persisted)
+    }, { timeout: 5000 }).toEqual([true])
+  })
+
+  test('a return from the back/forward cache records the restored position and no second load', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, TALL_PAGE)
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.evaluate(() => {
+      window.scrollTo(0, 800)
+    })
+    await page.waitForTimeout(500)
+    await page.goto(`${TEST_ORIGIN}/next`)
+    await page.waitForTimeout(500)
+    await page.evaluate(() => {
+      history.back()
+    })
+    await page.waitForTimeout(1000)
+
+    const events = (await capturedEvents(serviceWorker)).filter((event) => event.url === url)
+    const cachedAt = events.findIndex((event) => event.event_type === 'page_hide' && event.persisted === true)
+
+    expect(events.some((event) => event.event_type === 'page_show' && event.persisted === true)).toBe(true)
+
+    const scrollsAfter = events.slice(cachedAt).filter((event) => event.event_type === 'scroll')
+
+    expect(scrollsAfter.map((event) => event.top)).toEqual([800])
+    expect(events.filter((event) => event.event_type === 'load').length).toBe(1)
   })
 })

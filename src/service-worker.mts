@@ -14,6 +14,7 @@ import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 const EVENT_NAME = 'rex-page-event'
 const URL_ACTIVE_EVENT_NAME = 'rex-page-url-active' as const
 const LOG_PREFIX = '[rex-page-events]'
+const SCROLL_FIELDS = ['top', 'left', 'width', 'height', 'document_height'] as const
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,6 +30,7 @@ type EventType =
   | 'tab_close'
   | 'window_close'
   | 'load'
+  | 'scroll'
 
 interface PageEventsConfig {
   enabled: boolean
@@ -70,6 +72,11 @@ interface PageEventMessage {
   title?: string
   timestamp?: number
   persisted?: boolean
+  top?: number
+  left?: number
+  width?: number
+  height?: number
+  document_height?: number
 }
 
 export type UrlActiveListener = (event: RexPageUrlActiveEvent) => void
@@ -448,6 +455,12 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const extras: Record<string, unknown> = {}
     if (typeof message.persisted === 'boolean') {
       extras.persisted = message.persisted
+    }
+
+    for (const field of SCROLL_FIELDS) {
+      if (typeof message[field] === 'number') {
+        extras[field] = message[field]
+      }
     }
 
     await this.emit(message.event_type, state, tabId, url, title, now, extras)

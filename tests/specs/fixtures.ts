@@ -5,11 +5,13 @@ import path from 'path'
 import { fileURLToPath } from 'url';
 
 export const test = base.extend<{
+  backForwardCache: boolean
   context: BrowserContext
   extensionId: string,
   serviceWorker:ServiceWorker,
 }>({
-  context: async ({ }, use) => {
+  backForwardCache: [false, { option: true }],
+  context: async ({ backForwardCache }, use) => {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
 
@@ -17,6 +19,7 @@ export const test = base.extend<{
 
     const context = await chromium.launchPersistentContext('', {
       channel: 'chromium',
+      ignoreDefaultArgs: backForwardCache === true ? ['--disable-back-forward-cache'] : [],
       args: [
         `--disable-extensions-except=${pathToExtension}`,
         `--load-extension=${pathToExtension}`,

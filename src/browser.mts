@@ -1,6 +1,14 @@
 import { REXClientModule, registerREXModule } from '@bric/rex-core/browser'
 
-type BrowserEventType = 'page_show' | 'page_hide' | 'tab_focus' | 'tab_blur' | 'load'
+type BrowserEventType = 'page_show' | 'page_hide' | 'tab_focus' | 'tab_blur' | 'load' | 'scroll'
+
+interface ScrollPosition {
+  top: number
+  left: number
+  width: number
+  height: number
+  document_height: number
+}
 
 interface PageEventMessage {
   messageType: 'pageEvent'
@@ -9,7 +17,14 @@ interface PageEventMessage {
   title: string
   timestamp: number
   persisted?: boolean
+  top?: number
+  left?: number
+  width?: number
+  height?: number
+  document_height?: number
 }
+
+const SCROLL_PAUSE_MS = 250
 
 function loadStartTime(): number {
   const [navigation] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
@@ -17,7 +32,18 @@ function loadStartTime(): number {
   return performance.timeOrigin + navigation.loadEventStart
 }
 
+function scrollPosition(): ScrollPosition {
+  return {
+    top: window.scrollY,
+    left: window.scrollX,
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+    document_height: document.documentElement.scrollHeight,
+  }
+}
+
 class REXPageEventsModule extends REXClientModule {
+  private scrollTimer: ReturnType<typeof setTimeout> | undefined
   toString(): string {
     return 'REXPageEventsModule'
   }
@@ -26,6 +52,7 @@ class REXPageEventsModule extends REXClientModule {
     console.log('[rex-page-events] browser setup')
 
     this.recordLoad()
+    this.watchScroll()
 
     window.addEventListener('pageshow', (event: PageTransitionEvent) => {
       this.send({
@@ -86,6 +113,54 @@ class REXPageEventsModule extends REXClientModule {
     } else {
       window.addEventListener('load', sendLoad, { once: true })
     }
+  }
+
+  private watchScroll(): void {
+    this.recordScroll()
+
+    window.addEventListener('scroll', () => {
+      this.scheduleScroll()
+    })
+
+    window.addEventListener('pagehide', () => {
+      this.flushScroll()
+    })
+
+    window.addEventListener('pageshow', (event: PageTransitionEvent) => {
+      if (event.persisted === true) {
+        this.recordScroll()
+      }
+    })
+  }
+
+  private scheduleScroll(): void {
+    clearTimeout(this.scrollTimer)
+
+    this.scrollTimer = setTimeout(() => {
+      this.scrollTimer = undefined
+      this.recordScroll()
+    }, SCROLL_PAUSE_MS)
+  }
+
+  private flushScroll(): void {
+    if (this.scrollTimer === undefined) {
+      return
+    }
+
+    clearTimeout(this.scrollTimer)
+    this.scrollTimer = undefined
+    this.recordScroll()
+  }
+
+  private recordScroll(): void {
+    this.send({
+      messageType: 'pageEvent',
+      event_type: 'scroll',
+      url: location.href,
+      title: document.title,
+      timestamp: Date.now(),
+      ...scrollPosition(),
+    })
   }
 
   private send(message: PageEventMessage): void {
