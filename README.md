@@ -229,7 +229,7 @@ BRIC defines load, unload and scroll as follows. Each definition names its sourc
 - **Definition:** the page's document has finished loading; recorded once per document.
 - **Browser event:** `load` on `window`. If the content script arrives after the page has loaded, the load is recorded at once, with its time read from Navigation Timing (`loadEventStart`), so a late script still records the real load time.
 - **Not a load:** a return from the back/forward cache (a `page_show` with `persisted: true`), or a same-document navigation such as `history.pushState`.
-- **Limit:** a page left before it finishes loading has no `load`.
+- **Limits:** a page left before it finishes loading has no `load`. A page Chrome prerendered (loaded in the background before the participant chose it) records when it finished loading, which may be before the participant saw it; prerendering was not seen on Google results pages searched from the address bar (three searches, 2026-10-26).
 - **Sources:** [HTML, "The end"](https://html.spec.whatwg.org/multipage/parsing.html#the-end); [Navigation Timing Level 2](https://w3c.github.io/navigation-timing/).
 
 ### unload
