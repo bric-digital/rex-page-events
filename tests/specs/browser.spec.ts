@@ -254,6 +254,26 @@ test.describe('REX Page Events in pages', () => {
     expect(leftAt).toBeGreaterThan(lastScrollAt)
   })
 
+  test('closing the tab during a pause records the position, then page_hide, then tab_close', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, TALL_PAGE)
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.evaluate(() => {
+      window.scrollTo(0, 1200)
+    })
+    await page.close()
+
+    await expect.poll(async () => {
+      const events = await capturedEvents(serviceWorker)
+
+      return events
+        .filter((event) => event.url === url && ['scroll', 'page_hide', 'tab_close'].includes(event.event_type))
+        .map((event) => event.event_type === 'scroll' ? `scroll ${event.top}` : `${event.event_type} ${event.persisted ?? ''}`.trim())
+    }, { timeout: 5000 }).toEqual(['scroll 0', 'scroll 1200', 'page_hide false', 'tab_close'])
+  })
+
   test('a page too short to scroll records only its starting position', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker)
 
