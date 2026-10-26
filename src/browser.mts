@@ -8,6 +8,7 @@ interface ScrollPosition {
   width: number
   height: number
   document_height: number
+  document_width: number
 }
 
 interface PageEventMessage {
@@ -22,6 +23,7 @@ interface PageEventMessage {
   width?: number
   height?: number
   document_height?: number
+  document_width?: number
 }
 
 const SCROLL_PAUSE_MS = 250
@@ -39,6 +41,7 @@ function scrollPosition(): ScrollPosition {
     width: document.documentElement.clientWidth,
     height: document.documentElement.clientHeight,
     document_height: document.documentElement.scrollHeight,
+    document_width: document.documentElement.scrollWidth,
   }
 }
 

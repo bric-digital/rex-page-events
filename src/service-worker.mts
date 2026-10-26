@@ -14,7 +14,7 @@ import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 const EVENT_NAME = 'rex-page-event'
 const URL_ACTIVE_EVENT_NAME = 'rex-page-url-active' as const
 const LOG_PREFIX = '[rex-page-events]'
-const SCROLL_FIELDS = ['top', 'left', 'width', 'height', 'document_height'] as const
+const SCROLL_FIELDS = ['top', 'left', 'width', 'height', 'document_height', 'document_width'] as const
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,6 +77,7 @@ interface PageEventMessage {
   width?: number
   height?: number
   document_height?: number
+  document_width?: number
 }
 
 export type UrlActiveListener = (event: RexPageUrlActiveEvent) => void

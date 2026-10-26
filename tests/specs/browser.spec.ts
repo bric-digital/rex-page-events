@@ -66,6 +66,7 @@ async function pageEventsOf(serviceWorker, eventType) {
 }
 
 const TALL_PAGE = '<div style="height: 5000px">Tall page</div>'
+const WIDE_PAGE = '<div style="width: 5000px">Wide page</div>'
 
 async function capturedEvents(serviceWorker) {
   return serviceWorker.evaluate(() => self.__capturedEvents)
@@ -82,6 +83,7 @@ async function positionOf(page) {
     width: document.documentElement.clientWidth,
     height: document.documentElement.clientHeight,
     document_height: document.documentElement.scrollHeight,
+    document_width: document.documentElement.scrollWidth,
   }))
 }
 
@@ -92,6 +94,7 @@ function positionFields(event) {
     width: event.width,
     height: event.height,
     document_height: event.document_height,
+    document_width: event.document_width,
   }
 }
 
@@ -265,6 +268,25 @@ test.describe('REX Page Events in pages', () => {
 
     expect(scrolls.length).toBe(1)
     expect(scrolls[0].document_height).toBeLessThanOrEqual(scrolls[0].height)
+  })
+
+  test('scrolling a wide page sideways records its position and full width', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, WIDE_PAGE)
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.evaluate(() => {
+      window.scrollTo(800, 0)
+    })
+    await page.waitForTimeout(500)
+
+    const scrolls = await scrollsOf(serviceWorker, url)
+
+    expect(scrolls.length).toBe(2)
+    expect(positionFields(scrolls[1])).toEqual(await positionOf(page))
+    expect(scrolls[1].left).toBe(800)
+    expect(scrolls[1].document_width).toBeGreaterThan(scrolls[1].width)
   })
 
   test('scrolling inside a box records nothing', async ({ context, serviceWorker }) => {

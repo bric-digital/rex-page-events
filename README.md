@@ -47,7 +47,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `persisted` | Only on `page_show` / `page_hide`: the `PageTransitionEvent.persisted` bfcache flag |
 | `top`, `left` | Only on `scroll`: `window.scrollY` and `window.scrollX` |
 | `width`, `height` | Only on `scroll`: `document.documentElement.clientWidth` and `clientHeight`, the visible area |
-| `document_height` | Only on `scroll`: `document.documentElement.scrollHeight`, so scroll depth can be computed |
+| `document_height`, `document_width` | Only on `scroll`: `document.documentElement.scrollHeight` and `scrollWidth`, the full page, so scroll depth can be computed in both directions |
 | `url_shown_at` | Present on **every** event: the `Date.now()` when the event's `url` became active in this tab. Reset on every `tab_url_change` (to `now`) and minted fresh at `tab_open`. This is the **deterministic join key** against `rex-history-visit.visit_time`. |
 | `url_focus_duration_ms` | On `tab_url_change` and `tab_close`: ms the user had *this specific URL* focused in this tab. Per-URL, not per-tab — reset on every `tab_url_change`. |
 | `url_dwell_ms` | On `tab_url_change` and `tab_close`: wall-clock ms the URL was the active URL in this tab (regardless of focus). Useful for differentiating "tab in background for an hour" from "user actively reading." |
