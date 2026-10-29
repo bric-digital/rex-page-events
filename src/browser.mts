@@ -1,30 +1,6 @@
 import { REXClientModule, registerREXModule } from '@bric/rex-core/browser'
 
-type BrowserEventType = 'page_show' | 'page_hide' | 'tab_focus' | 'tab_blur' | 'load' | 'scroll'
-
-interface ScrollPosition {
-  top: number
-  left: number
-  width: number
-  height: number
-  document_height: number
-  document_width: number
-}
-
-interface PageEventMessage {
-  messageType: 'pageEvent'
-  event_type: BrowserEventType
-  url: string
-  title: string
-  timestamp: number
-  persisted?: boolean
-  top?: number
-  left?: number
-  width?: number
-  height?: number
-  document_height?: number
-  document_width?: number
-}
+import { type PageEventMessage, type ScrollPosition } from './types.mjs'
 
 const SCROLL_PAUSE_MS = 250
 
@@ -162,7 +138,7 @@ class REXPageEventsModule extends REXClientModule {
       url: location.href,
       title: document.title,
       timestamp: Date.now(),
-      ...scrollPosition(),
+      scroll_position: scrollPosition(),
     })
   }
 

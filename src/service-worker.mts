@@ -7,6 +7,8 @@ import rexCorePlugin, {
 import * as listUtils from '@bric/rex-lists'
 import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
+import { type PageEventMessage, type PageEventType } from './types.mjs'
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -14,23 +16,10 @@ import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 const EVENT_NAME = 'rex-page-event'
 const URL_ACTIVE_EVENT_NAME = 'rex-page-url-active' as const
 const LOG_PREFIX = '[rex-page-events]'
-const SCROLL_FIELDS = ['top', 'left', 'width', 'height', 'document_height', 'document_width'] as const
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-type EventType =
-  | 'tab_open'
-  | 'tab_url_change'
-  | 'tab_focus'
-  | 'tab_blur'
-  | 'page_show'
-  | 'page_hide'
-  | 'tab_close'
-  | 'window_close'
-  | 'load'
-  | 'scroll'
 
 interface PageEventsConfig {
   enabled: boolean
@@ -63,21 +52,6 @@ interface RedactionResult {
   filtered: boolean
   filtered_by_list?: string
   allowed_by_list?: string
-}
-
-interface PageEventMessage {
-  messageType?: string
-  event_type?: EventType
-  url?: string
-  title?: string
-  timestamp?: number
-  persisted?: boolean
-  top?: number
-  left?: number
-  width?: number
-  height?: number
-  document_height?: number
-  document_width?: number
 }
 
 export type UrlActiveListener = (event: RexPageUrlActiveEvent) => void
@@ -458,10 +432,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       extras.persisted = message.persisted
     }
 
-    for (const field of SCROLL_FIELDS) {
-      if (typeof message[field] === 'number') {
-        extras[field] = message[field]
-      }
+    if (message.scroll_position !== undefined) {
+      extras.scroll_position = message.scroll_position
     }
 
     await this.emit(message.event_type, state, tabId, url, title, now, extras)
@@ -472,7 +444,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   // -------------------------------------------------------------------------
 
   private async emit(
-    eventType: EventType,
+    eventType: PageEventType,
     state: TabState,
     tabId: number | undefined,
     url: string,

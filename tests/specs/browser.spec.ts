@@ -87,17 +87,6 @@ async function positionOf(page) {
   }))
 }
 
-function positionFields(event) {
-  return {
-    top: event.top,
-    left: event.left,
-    width: event.width,
-    height: event.height,
-    document_height: event.document_height,
-    document_width: event.document_width,
-  }
-}
-
 test.describe('REX Page Events in pages', () => {
   test('leaving a page the browser does not cache records page_hide with persisted false', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker)
@@ -202,8 +191,8 @@ test.describe('REX Page Events in pages', () => {
     const scrolls = await scrollsOf(serviceWorker, url)
 
     expect(scrolls.length).toBe(1)
-    expect(positionFields(scrolls[0])).toEqual(await positionOf(page))
-    expect(scrolls[0].top).toBe(0)
+    expect(scrolls[0].scroll_position).toEqual(await positionOf(page))
+    expect(scrolls[0].scroll_position.top).toBe(0)
   })
 
   test('scrolling records one position per pause and none while it continues', async ({ context, serviceWorker }) => {
@@ -226,8 +215,8 @@ test.describe('REX Page Events in pages', () => {
     const scrolls = await scrollsOf(serviceWorker, url)
 
     expect(scrolls.length).toBe(2)
-    expect(scrolls[1].top).toBe((await positionOf(page)).top)
-    expect(scrolls[1].top).toBeGreaterThan(0)
+    expect(scrolls[1].scroll_position.top).toBe((await positionOf(page)).top)
+    expect(scrolls[1].scroll_position.top).toBeGreaterThan(0)
   })
 
   test('leaving the page during a pause records the position at once (D60)', async ({ context, serviceWorker }) => {
@@ -244,7 +233,7 @@ test.describe('REX Page Events in pages', () => {
     await expect.poll(async () => {
       const scrolls = await scrollsOf(serviceWorker, url)
 
-      return scrolls.map((event) => event.top)
+      return scrolls.map((event) => event.scroll_position.top)
     }, { timeout: 5000 }).toEqual([0, 1200])
 
     const events = await capturedEvents(serviceWorker)
@@ -270,7 +259,7 @@ test.describe('REX Page Events in pages', () => {
 
       return events
         .filter((event) => event.url === url && ['scroll', 'page_hide', 'tab_close'].includes(event.event_type))
-        .map((event) => event.event_type === 'scroll' ? `scroll ${event.top}` : `${event.event_type} ${event.persisted ?? ''}`.trim())
+        .map((event) => event.event_type === 'scroll' ? `scroll ${event.scroll_position.top}` : `${event.event_type} ${event.persisted ?? ''}`.trim())
     }, { timeout: 5000 }).toEqual(['scroll 0', 'scroll 1200', 'page_hide false', 'tab_close'])
   })
 
@@ -287,7 +276,7 @@ test.describe('REX Page Events in pages', () => {
     const scrolls = await scrollsOf(serviceWorker, url)
 
     expect(scrolls.length).toBe(1)
-    expect(scrolls[0].document_height).toBeLessThanOrEqual(scrolls[0].height)
+    expect(scrolls[0].scroll_position.document_height).toBeLessThanOrEqual(scrolls[0].scroll_position.height)
   })
 
   test('scrolling a wide page sideways records its position and full width', async ({ context, serviceWorker }) => {
@@ -304,9 +293,9 @@ test.describe('REX Page Events in pages', () => {
     const scrolls = await scrollsOf(serviceWorker, url)
 
     expect(scrolls.length).toBe(2)
-    expect(positionFields(scrolls[1])).toEqual(await positionOf(page))
-    expect(scrolls[1].left).toBe(800)
-    expect(scrolls[1].document_width).toBeGreaterThan(scrolls[1].width)
+    expect(scrolls[1].scroll_position).toEqual(await positionOf(page))
+    expect(scrolls[1].scroll_position.left).toBe(800)
+    expect(scrolls[1].scroll_position.document_width).toBeGreaterThan(scrolls[1].scroll_position.width)
   })
 
   test('scrolling inside a box records nothing', async ({ context, serviceWorker }) => {
@@ -368,7 +357,7 @@ test.describe('REX Page Events in pages the browser caches', () => {
 
     const scrollsAfter = events.slice(cachedAt).filter((event) => event.event_type === 'scroll')
 
-    expect(scrollsAfter.map((event) => event.top)).toEqual([800])
+    expect(scrollsAfter.map((event) => event.scroll_position.top)).toEqual([800])
     expect(events.filter((event) => event.event_type === 'load').length).toBe(1)
   })
 })

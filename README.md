@@ -45,9 +45,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `filtered_by_list` | Present only when `filtered: true`: the list name that caused the redaction (or `"NOT_ON_ALLOWLIST"` for allow-list rejections) |
 | `allowed_by_list` | Present only when `allow_lists` is configured and the URL matched one: the allow-list name |
 | `persisted` | Only on `page_show` / `page_hide`: the `PageTransitionEvent.persisted` bfcache flag |
-| `top`, `left` | Only on `scroll`: `window.scrollY` and `window.scrollX` |
-| `width`, `height` | Only on `scroll`: `document.documentElement.clientWidth` and `clientHeight`, the visible area |
-| `document_height`, `document_width` | Only on `scroll`: `document.documentElement.scrollHeight` and `scrollWidth`, the full page, so scroll depth can be computed in both directions |
+| `scroll_position` | Only on `scroll`: a `ScrollPosition` object (`src/types.mts`) with `top` and `left` (`window.scrollY` and `window.scrollX`), `width` and `height` (`document.documentElement.clientWidth` and `clientHeight`, the visible area), and `document_height` and `document_width` (`scrollHeight` and `scrollWidth`, the full page, so scroll depth can be computed in both directions) |
 | `url_shown_at` | Present on **every** event: the `Date.now()` when the event's `url` became active in this tab. Reset on every `tab_url_change` (to `now`) and minted fresh at `tab_open`. This is the **deterministic join key** against `rex-history-visit.visit_time`. |
 | `url_focus_duration_ms` | On `tab_url_change` and `tab_close`: ms the user had *this specific URL* focused in this tab. Per-URL, not per-tab — reset on every `tab_url_change`. |
 | `url_dwell_ms` | On `tab_url_change` and `tab_close`: wall-clock ms the URL was the active URL in this tab (regardless of focus). Useful for differentiating "tab in background for an hour" from "user actively reading." |
@@ -246,7 +244,7 @@ BRIC defines load, unload and scroll as follows. Each definition names its sourc
 - **Limits:**
   - Only the page's own scroll position; scrolling inside an element with its own scroll bar is not recorded.
   - A position is recorded only after a pause or on leaving, so scrolling down and back up without pausing does not record the furthest point reached. Scroll depth is a lower bound.
-  - `width`, `height`, `document_height` and `document_width` are as of the last `scroll` record. Resizing the window, or the page growing as content loads, makes no new record.
+  - The `width`, `height`, `document_height` and `document_width` in `scroll_position` are as of the last `scroll` record. Resizing the window, or the page growing as content loads, makes no new record.
   - Scrolls made by the page or the browser, such as a jump to an anchor or a restored position, are recorded like the participant's own.
 - **Sources:** [CSSOM View, scrolling](https://drafts.csswg.org/cssom-view/#scrolling-events) and [`scrollX`/`scrollY`](https://drafts.csswg.org/cssom-view/#dom-window-scrollx).
 
