@@ -1,23 +1,37 @@
 import { REXClientModule, registerREXModule } from '@bric/rex-core/browser'
 
-type BrowserEventType = 'page_show' | 'page_hide' | 'tab_focus' | 'tab_blur'
+import { type PageEventMessage, type ScrollPosition } from './types.mjs'
 
-interface PageEventMessage {
-  messageType: 'pageEvent'
-  event_type: BrowserEventType
-  url: string
-  title: string
-  timestamp: number
-  persisted?: boolean
+const SCROLL_PAUSE_MS = 250
+
+function loadStartTime(): number {
+  const [navigation] = window.performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
+
+  return Math.round(window.performance.timeOrigin + navigation.loadEventStart)
+}
+
+function scrollPosition(): ScrollPosition {
+  return {
+    top: window.scrollY,
+    left: window.scrollX,
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+    document_height: document.documentElement.scrollHeight,
+    document_width: document.documentElement.scrollWidth,
+  }
 }
 
 class REXPageEventsModule extends REXClientModule {
+  private scrollTimer: ReturnType<typeof setTimeout> | null = null
   toString(): string {
     return 'REXPageEventsModule'
   }
 
   setup() {
     console.log('[rex-page-events] browser setup')
+
+    this.recordLoad()
+    this.watchScroll()
 
     window.addEventListener('pageshow', (event: PageTransitionEvent) => {
       this.send({
@@ -62,17 +76,78 @@ class REXPageEventsModule extends REXClientModule {
     })
   }
 
-  private send(message: PageEventMessage): void {
-    try {
-      const result = chrome.runtime.sendMessage(message)
-      if (result && typeof (result as Promise<unknown>).catch === 'function') {
-        ;(result as Promise<unknown>).catch((err: unknown) => {
-          console.debug('[rex-page-events] sendMessage failed', err)
-        })
-      }
-    } catch (err) {
-      console.debug('[rex-page-events] sendMessage threw', err)
+  private recordLoad(): void {
+    const sendLoad = () => {
+      this.send({
+        messageType: 'pageEvent',
+        event_type: 'load',
+        url: location.href,
+        title: document.title,
+        timestamp: loadStartTime(),
+      })
     }
+
+    if (document.readyState === 'complete') {
+      sendLoad()
+    } else {
+      window.addEventListener('load', sendLoad, { once: true })
+    }
+  }
+
+  private watchScroll(): void {
+    this.recordScroll()
+
+    window.addEventListener('scroll', () => {
+      this.scheduleScroll()
+    })
+
+    window.addEventListener('pagehide', () => {
+      this.flushScroll()
+    })
+
+    window.addEventListener('pageshow', (event: PageTransitionEvent) => {
+      if (event.persisted === true) {
+        this.recordScroll()
+      }
+    })
+  }
+
+  private scheduleScroll(): void {
+    if (this.scrollTimer !== null) {
+      clearTimeout(this.scrollTimer)
+    }
+
+    this.scrollTimer = setTimeout(() => {
+      this.scrollTimer = null
+      this.recordScroll()
+    }, SCROLL_PAUSE_MS)
+  }
+
+  private flushScroll(): void {
+    if (this.scrollTimer === null) {
+      return
+    }
+
+    clearTimeout(this.scrollTimer)
+    this.scrollTimer = null
+    this.recordScroll()
+  }
+
+  private recordScroll(): void {
+    this.send({
+      messageType: 'pageEvent',
+      event_type: 'scroll',
+      url: location.href,
+      title: document.title,
+      timestamp: Date.now(),
+      scroll_position: scrollPosition(),
+    })
+  }
+
+  private send(message: PageEventMessage): void {
+    chrome.runtime.sendMessage(message).catch((error: unknown) => {
+      console.debug('[rex-page-events] sendMessage failed', error)
+    })
   }
 }
 

@@ -6,7 +6,7 @@ REX module that records page, tab, and window lifecycle events and transmits the
 
 **rex-page-events** tracks when pages appear, disappear, gain focus, lose focus, when tabs open/navigate/close, and when browser windows close. Each observation produces a single event dispatched via `dispatchEvent` in rex-core. URLs can be redacted against lists managed by `rex-lists`, so sensitive sites can be tracked for **dwell time** without capturing the URL or page title.
 
-- Records page_show / page_hide / tab_focus / tab_blur (from content scripts)
+- Records page_show / page_hide / tab_focus / tab_blur / load / scroll (from content scripts)
 - Records tab_open / tab_url_change / tab_close / window_close (from the service worker)
 - Per-tab session_id (UUID) minted at tab_open, carried on every subsequent event for that tab
 - `tab_close` events carry `tab_lifetime_ms` and `focus_duration_ms` (accumulated time the tab was actually focused)
@@ -14,7 +14,7 @@ REX module that records page, tab, and window lifecycle events and transmits the
 
 ## Event Schema
 
-Every event shares the name `rex-page-event` and is distinguished by `event_type`. There are eight event types in the current implementation.
+Every event shares the name `rex-page-event` and is distinguished by `event_type`. There are ten event types in the current implementation.
 
 | `event_type` | Source | Notes |
 |---|---|---|
@@ -26,23 +26,26 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `page_hide` | Content-script `window.pagehide` | Includes bfcache `persisted` flag |
 | `tab_close` | `chrome.tabs.onRemoved` | Carries `tab_lifetime_ms` and `focus_duration_ms` |
 | `window_close` | `chrome.windows.onRemoved` | Emitted once per window close |
+| `load` | Content-script `window.load`, or Navigation Timing when the script arrives after load | Once per document, at the time `load` began |
+| `scroll` | Content-script `window.scroll`, after a 250 ms pause | Also at the start, on leaving during a pause, and on return from the bfcache |
 
 ### Where each field comes from
 
 | Field | Source |
 |---|---|
 | `name` | Hardcoded: `"rex-page-event"` for every event |
-| `event_type` | One of the eight types in the table above |
+| `event_type` | One of the ten types in the table above |
 | `session_id` | `crypto.randomUUID()` — minted once on `tab_open` (or on first observed event for a tab whose `onCreated` was missed), then attached to every subsequent event for that tab |
 | `tab_id` | `chrome.tabs.*` listeners (the active listener's `tabId` argument), or `sender.tab.id` for content-script-originated events |
 | `window_id` | Same listeners / `sender.tab.windowId` |
-| `url` | For service-worker events: the `chrome.tabs.Tab` handed to the listener. For content-script events (`page_show`, `page_hide`, `tab_focus`, `tab_blur`): `location.href` captured in the page context. May be replaced by a redaction token — see **Redaction** below. |
+| `url` | For service-worker events: the `chrome.tabs.Tab` handed to the listener. For content-script events (`page_show`, `page_hide`, `tab_focus`, `tab_blur`, `load`, `scroll`): `location.href` captured in the page context. May be replaced by a redaction token — see **Redaction** below. |
 | `title` | Same two sources as `url` (`tab.title` in the service worker, `document.title` in the page). Omitted entirely when the URL is redacted by an allow- or filter-list. |
-| `timestamp`, `date` | `Date.now()`, captured once per event and assigned to both fields (PDK expects `date`; we also surface it under `timestamp` for clarity) |
+| `timestamp`, `date` | `Date.now()`, captured once per event and assigned to both fields (PDK expects `date`; we also surface it under `timestamp` for clarity). For `load`, the time `load` began (`performance.timeOrigin + loadEventStart`) |
 | `filtered` | `true` iff any list matched or the URL failed an allow-list check — see **Redaction** |
 | `filtered_by_list` | Present only when `filtered: true`: the list name that caused the redaction (or `"NOT_ON_ALLOWLIST"` for allow-list rejections) |
 | `allowed_by_list` | Present only when `allow_lists` is configured and the URL matched one: the allow-list name |
 | `persisted` | Only on `page_show` / `page_hide`: the `PageTransitionEvent.persisted` bfcache flag |
+| `scroll_position` | Only on `scroll`: a `ScrollPosition` object (`src/types.mts`) with `top` and `left` (`window.scrollY` and `window.scrollX`), `width` and `height` (`document.documentElement.clientWidth` and `clientHeight`, the visible area), and `document_height` and `document_width` (`scrollHeight` and `scrollWidth`, the full page, so scroll depth can be computed in both directions) |
 | `url_shown_at` | Present on **every** event: the `Date.now()` when the event's `url` became active in this tab. Reset on every `tab_url_change` (to `now`) and minted fresh at `tab_open`. This is the **deterministic join key** against `rex-history-visit.visit_time`. |
 | `url_focus_duration_ms` | On `tab_url_change` and `tab_close`: ms the user had *this specific URL* focused in this tab. Per-URL, not per-tab — reset on every `tab_url_change`. |
 | `url_dwell_ms` | On `tab_url_change` and `tab_close`: wall-clock ms the URL was the active URL in this tab (regardless of focus). Useful for differentiating "tab in background for an hour" from "user actively reading." |
@@ -215,6 +218,43 @@ Evaluation order for outbound events:
 
 URL fragments are matched **exactly**: `https://a/#x` and `https://a/#y` are treated as different URLs both for event emission and for `rex-page-url-active` delivery.
 
+## Event definitions
+
+BRIC defines load, unload and scroll as follows. Each definition names its source, and changes when one of the conditions under **When a definition changes** applies.
+
+### load
+
+- **Definition:** the page's document has finished loading; recorded once per document.
+- **Browser event:** `load` on `window`. If the content script arrives after the page has loaded, the load is recorded at once, with its time read from Navigation Timing (`loadEventStart`), so a late script still records the real load time.
+- **Not a load:** a return from the back/forward cache (a `page_show` with `persisted: true`), or a same-document navigation such as `history.pushState`.
+- **Limits:** a page left before it finishes loading has no `load`, and neither does a page left before the content script arrives. A page Chrome prerendered (loaded in the background before the participant chose it) records when it finished loading, which may be before the participant saw it; prerendering was not seen on Google results pages searched from the address bar (three searches, 2026-10-26).
+- **Sources:** [HTML, "The end"](https://html.spec.whatwg.org/multipage/parsing.html#the-end); [Navigation Timing Level 2](https://w3c.github.io/navigation-timing/).
+
+### unload
+
+- **Definition:** the page stops being shown in its tab. Every `page_hide` is an unload; no separate event type is recorded.
+- **Why `page_hide`:** Chrome no longer fires `unload` and recommends `pagehide` instead. On a normal navigation away Chrome usually keeps the page in the back/forward cache, so `page_hide` usually carries `persisted: true`; `persisted: false` means the browser did not keep the page.
+- **Limit:** a kept page that the browser discards later produces no further event; a `page_show` with `persisted: true` follows only if the participant returns.
+- **Sources:** [HTML, "Unload a document"](https://html.spec.whatwg.org/multipage/document-lifecycle.html#unload-a-document); [Chrome, "Deprecating the unload event"](https://developer.chrome.com/docs/web-platform/deprecating-unload); [web.dev, "Back/forward cache"](https://web.dev/articles/bfcache).
+
+### scroll
+
+- **Definition:** the page's own scroll position once scrolling has paused for 250 ms. Also recorded when the content script starts (the starting position), when the page is left while a record is waiting, and when the page returns from the back/forward cache.
+- **Browser event:** `scroll` on `window`, with a timer restarted on every scroll event.
+- **Limits:**
+  - Only the page's own scroll position; scrolling inside an element with its own scroll bar is not recorded.
+  - A position is recorded only after a pause or on leaving, so scrolling down and back up without pausing does not record the furthest point reached. Scroll depth is a lower bound.
+  - The `width`, `height`, `document_height` and `document_width` in `scroll_position` are as of the last `scroll` record. Resizing the window, or the page growing as content loads, makes no new record.
+  - Scrolls made by the page or the browser, such as a jump to an anchor or a restored position, are recorded like the participant's own.
+- **Sources:** [CSSOM View, scrolling](https://drafts.csswg.org/cssom-view/#scrolling-events) and [`scrollX`/`scrollY`](https://drafts.csswg.org/cssom-view/#dom-window-scrollx).
+
+### When a definition changes
+
+- A specification it relies on changes, for example CSSOM View's `scrollend` reaching Recommendation, or HTML changing `pagehide`.
+- Chrome or Edge changes how an event fires, as Chrome did with `unload`.
+- BRIC sets a different definition for a study.
+- Research that BRIC adopts defines the measure differently.
+
 ## Cross-tab referral linkage
 
 When a user opens a link in a new tab (middle-click, `target="_blank"`, `window.open`, Ctrl/Cmd-click, "Open link in new tab" context menu), the `tab_open` event carries `opener_tab_id` and — when this module has state for the opener — `opener_url` and `opener_filtered`. `opener_url` is the opener tab's URL **at the moment the new tab was created**. It is recorded once and not revised if the opener subsequently navigates away; that is deliberate, because the referral relationship is defined at the instant of the click.
@@ -340,13 +380,10 @@ npm install
 npm test
 ```
 
-`pretest` bundles the module against a test shim with stubbed `chrome.*` APIs; `npm test` then runs the Playwright spec suite under `tests/specs/`:
+`pretest` bundles the test extension's service worker and browser part; `npm test` then runs the Playwright spec suite under `tests/specs/`:
 
-- `page-lifecycle.spec.ts` — verifies pageshow / pagehide / focus / blur forwarding.
-- `tab-lifecycle.spec.ts` — verifies tab_open / tab_url_change / tab_focus / tab_blur / tab_close / window_close; that `focus_duration_ms` accumulates correctly across a tab's lifetime; that `tab_url_change` flushes a segment with accurate `url_focus_duration_ms` and `url_dwell_ms`; that `previous_url` is absent on a tab's first navigation and populated on the second; and that `tab_open` carries `opener_tab_id` / `opener_url` only when Chrome reports an opener and only when this module has state for that opener tab.
-- `redaction.spec.ts` — verifies allow / filter / domain_only redaction paths, that dwell time is recorded even for fully redacted URLs, and that `previous_url_filtered` / `opener_filtered` reflect each referenced URL's own redaction status independently of the top-level `filtered`.
-- `url-active-delivery.spec.ts` — verifies the `globalThis.__rexPageEventsUrlActive.subscribe` seam: subscriber fires on `tab_open` and `tab_url_change`, receives the raw URL even when outbound events are redacted, is not echoed onto the event bus by default, IS echoed in `debug: true` mode, exact fragment matching, unsubscribe works.
-- `config.spec.ts` — verifies `enabled: false` suppresses all events and that events arriving pre-config are ignored safely.
+- `service-worker.spec.ts`: verifies tab_open, tab_url_change (describing the outgoing URL), tab_close lifetime stats, the url-active seam, and that `enabled: false` suppresses events.
+- `browser.spec.ts`: loads the browser part through rex-core's own injection and verifies page_hide's `persisted` flag on leaving a page the browser caches and one it does not, `load` when the script arrives before and after load, `scroll` at the start, after a pause, on leaving and on return from the bfcache, and the order of `scroll`, `page_hide` and `tab_close` when a tab is closed. Tests that need the bfcache set the fixture option `backForwardCache`, because Playwright otherwise starts Chromium with it disabled.
 
 Add coverage here when changing behavior.
 
@@ -355,7 +392,7 @@ Add coverage here when changing behavior.
 The following signals are intentionally **not** currently captured, to limit payload volume and PII surface:
 
 - **Mouse interactions** (`mousedown`, `mouseup`) — high-frequency, noisy, may need in the future.
-- **`DOMContentLoaded` / `readystatechange`** — redundant with `page_show` for lifecycle purposes, may need in the future.
+- **`DOMContentLoaded` / `readystatechange`**: `load` records when the page finished loading; add these if researchers need the moment parsing finished.
 - **`freeze` / `resume` / `visibilitychange`** — partially covered by focus/blur; add if researchers need bfcache-specific signals.
 
 Revisit these when researcher use-cases demand finer-grained signals. If added, keep them behind config flags so existing deployments don't silently grow their payload.
