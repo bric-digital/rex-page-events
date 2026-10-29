@@ -5,9 +5,9 @@ import { type PageEventMessage, type ScrollPosition } from './types.mjs'
 const SCROLL_PAUSE_MS = 250
 
 function loadStartTime(): number {
-  const [navigation] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
+  const [navigation] = window.performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
 
-  return Math.round(performance.timeOrigin + navigation.loadEventStart)
+  return Math.round(window.performance.timeOrigin + navigation.loadEventStart)
 }
 
 function scrollPosition(): ScrollPosition {
