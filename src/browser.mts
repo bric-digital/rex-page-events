@@ -22,7 +22,7 @@ function scrollPosition(): ScrollPosition {
 }
 
 class REXPageEventsModule extends REXClientModule {
-  private scrollTimer: ReturnType<typeof setTimeout> | undefined
+  private scrollTimer: ReturnType<typeof setTimeout> | null = null
   toString(): string {
     return 'REXPageEventsModule'
   }
@@ -113,21 +113,23 @@ class REXPageEventsModule extends REXClientModule {
   }
 
   private scheduleScroll(): void {
-    clearTimeout(this.scrollTimer)
+    if (this.scrollTimer !== null) {
+      clearTimeout(this.scrollTimer)
+    }
 
     this.scrollTimer = setTimeout(() => {
-      this.scrollTimer = undefined
+      this.scrollTimer = null
       this.recordScroll()
     }, SCROLL_PAUSE_MS)
   }
 
   private flushScroll(): void {
-    if (this.scrollTimer === undefined) {
+    if (this.scrollTimer === null) {
       return
     }
 
     clearTimeout(this.scrollTimer)
-    this.scrollTimer = undefined
+    this.scrollTimer = null
     this.recordScroll()
   }
 

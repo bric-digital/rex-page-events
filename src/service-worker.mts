@@ -4,7 +4,7 @@ import rexCorePlugin, {
   registerREXModule,
   dispatchEvent,
 } from '@bric/rex-core/service-worker'
-import * as listUtils from '@bric/rex-lists'
+import { matchDomainAgainstList } from '@bric/rex-lists'
 import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
 import { type PageEventMessage, type PageEventType } from './types.mjs'
@@ -30,15 +30,15 @@ interface PageEventsConfig {
 }
 
 interface TabState {
-  session_id: string
-  window_id: number
-  openedAt: number
-  lastFocusAt: number | null
+  sessionId: string
+  windowId: number
+  openedAtMs: number
+  lastFocusAtMs: number | null
   focusDurationMs: number
   // Per-URL-segment accounting. `currentUrl` is the URL presently showing in the tab;
   // the segment resets on every tab_url_change (and mints fresh at tab_open).
   currentUrl: string
-  currentUrlShownAt: number
+  currentUrlShownAtMs: number
   currentUrlFocusMs: number
   lastTitle: string
   // URL that preceded currentUrl in this tab, if any. Populated on tab_url_change
@@ -103,7 +103,7 @@ function makeSessionId(): string {
 class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   config: PageEventsConfig | null = null
   tabState: Map<number, TabState> = new Map()
-  listenersRegistered = false
+  listenersRegistered: boolean = false
 
   moduleName() {
     return 'PageEventsModule'
@@ -201,13 +201,13 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const title = tab.title || ''
 
     const state: TabState = {
-      session_id: makeSessionId(),
-      window_id: tab.windowId,
-      openedAt: now,
-      lastFocusAt: tab.active ? now : null,
+      sessionId: makeSessionId(),
+      windowId: tab.windowId,
+      openedAtMs: now,
+      lastFocusAtMs: tab.active ? now : null,
       focusDurationMs: 0,
       currentUrl: url,
-      currentUrlShownAt: now,
+      currentUrlShownAtMs: now,
       currentUrlFocusMs: 0,
       lastTitle: title,
       priorUrl: null,
@@ -245,18 +245,18 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     // Flush the outgoing segment. If the tab is currently focused, add the open
     // focus fragment to the segment counter first so url_focus_duration_ms is accurate.
-    if (state.lastFocusAt !== null) {
-      const focusFragment = now - state.lastFocusAt
+    if (state.lastFocusAtMs !== null) {
+      const focusFragment = now - state.lastFocusAtMs
       state.focusDurationMs += focusFragment
       state.currentUrlFocusMs += focusFragment
-      // Re-arm lastFocusAt so the new segment gets credit for ongoing focus.
-      state.lastFocusAt = now
+      // Re-arm lastFocusAtMs so the new segment gets credit for ongoing focus.
+      state.lastFocusAtMs = now
     }
 
     const outgoingUrl = state.currentUrl
     const outgoingTitle = state.lastTitle
     const urlFocusDurationMs = state.currentUrlFocusMs
-    const urlDwellMs = now - state.currentUrlShownAt
+    const urlDwellMs = now - state.currentUrlShownAtMs
 
     // Redact previous_url with the same rules as url so privacy is consistent.
     let previousUrlRedacted: string | undefined
@@ -283,13 +283,13 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
         previous_url: previousUrlRedacted,
         previous_url_filtered: previousUrlFiltered,
       },
-      state.currentUrlShownAt
+      state.currentUrlShownAtMs
     )
 
     // Reset segment state for the new URL.
     state.priorUrl = outgoingUrl
     state.currentUrl = newUrl
-    state.currentUrlShownAt = now
+    state.currentUrlShownAtMs = now
     state.currentUrlFocusMs = 0
     state.lastTitle = tab.title || ''
 
@@ -309,15 +309,15 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
 
     // Finalize focus: if currently focused, close the fragment into BOTH counters.
-    if (state.lastFocusAt !== null) {
-      const fragment = now - state.lastFocusAt
+    if (state.lastFocusAtMs !== null) {
+      const fragment = now - state.lastFocusAtMs
       state.focusDurationMs += fragment
       state.currentUrlFocusMs += fragment
-      state.lastFocusAt = null
+      state.lastFocusAtMs = null
     }
 
-    const tabLifetimeMs = now - state.openedAt
-    const urlDwellMs = now - state.currentUrlShownAt
+    const tabLifetimeMs = now - state.openedAtMs
+    const urlDwellMs = now - state.currentUrlShownAtMs
 
     await this.emit(
       'tab_close',
@@ -346,11 +346,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     // Blur every other tab in the same window that was focused.
     for (const [otherTabId, otherState] of this.tabState.entries()) {
-      if (otherTabId !== tabId && otherState.window_id === windowId && otherState.lastFocusAt !== null) {
-        const fragment = now - otherState.lastFocusAt
+      if (otherTabId !== tabId && otherState.windowId === windowId && otherState.lastFocusAtMs !== null) {
+        const fragment = now - otherState.lastFocusAtMs
         otherState.focusDurationMs += fragment
         otherState.currentUrlFocusMs += fragment
-        otherState.lastFocusAt = null
+        otherState.lastFocusAtMs = null
         await this.emit('tab_blur', otherState, otherTabId, otherState.currentUrl, otherState.lastTitle, now)
       }
     }
@@ -359,8 +359,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     if (state === undefined) {
       return
     }
-    if (state.lastFocusAt === null) {
-      state.lastFocusAt = now
+    if (state.lastFocusAtMs === null) {
+      state.lastFocusAtMs = now
       await this.emit('tab_focus', state, tabId, state.currentUrl, state.lastTitle, now)
     }
   }
@@ -375,11 +375,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     if (windowLost) {
       // Blur every focused tab.
       for (const [tabId, state] of this.tabState.entries()) {
-        if (state.lastFocusAt !== null) {
-          const fragment = now - state.lastFocusAt
+        if (state.lastFocusAtMs !== null) {
+          const fragment = now - state.lastFocusAtMs
           state.focusDurationMs += fragment
           state.currentUrlFocusMs += fragment
-          state.lastFocusAt = null
+          state.lastFocusAtMs = null
           await this.emit('tab_blur', state, tabId, state.currentUrl, state.lastTitle, now)
         }
       }
@@ -393,13 +393,13 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const now = Date.now()
     // window_close is window-level; no tab context.
     const synthetic: TabState = {
-      session_id: makeSessionId(),
-      window_id: windowId,
-      openedAt: now,
-      lastFocusAt: null,
+      sessionId: makeSessionId(),
+      windowId: windowId,
+      openedAtMs: now,
+      lastFocusAtMs: null,
       focusDurationMs: 0,
       currentUrl: '',
-      currentUrlShownAt: now,
+      currentUrlShownAtMs: now,
       currentUrlFocusMs: 0,
       lastTitle: '',
       priorUrl: null,
@@ -451,17 +451,17 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     title: string,
     timestamp: number,
     extras: Record<string, unknown> = {},
-    urlShownAtOverride?: number
+    urlShownAtOverrideMs?: number
   ) {
     const redaction = await this.redact(url, title)
 
     const payload: Record<string, unknown> = {
       name: EVENT_NAME,
       event_type: eventType,
-      session_id: state.session_id,
-      window_id: state.window_id,
+      session_id: state.sessionId,
+      window_id: state.windowId,
       url: redaction.url,
-      url_shown_at: urlShownAtOverride ?? state.currentUrlShownAt,
+      url_shown_at: urlShownAtOverrideMs ?? state.currentUrlShownAtMs,
       timestamp,
       date: timestamp,
       filtered: redaction.filtered,
@@ -491,15 +491,15 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     state: TabState,
     tabId: number,
     url: string,
-    urlShownAt: number
+    urlShownAtMs: number
   ) {
     const record: RexPageUrlActiveEvent = {
       name: URL_ACTIVE_EVENT_NAME,
       tab_id: tabId,
-      window_id: state.window_id,
-      session_id: state.session_id,
+      window_id: state.windowId,
+      session_id: state.sessionId,
       url,
-      url_shown_at: urlShownAt,
+      url_shown_at: urlShownAtMs,
     }
 
     // Always deliver to in-process subscribers.
@@ -529,7 +529,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       let matched: { list: string } | null = null
       for (const listName of allowLists) {
         try {
-          const entry = await listUtils.matchDomainAgainstList(url, listName)
+          const entry = await matchDomainAgainstList(url, listName)
           if (entry) {
             matched = { list: listName }
             break
@@ -573,7 +573,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const lists = this.config?.filter_lists ?? []
     for (const listName of lists) {
       try {
-        const entry = await listUtils.matchDomainAgainstList(url, listName)
+        const entry = await matchDomainAgainstList(url, listName)
         if (entry) {
           const category = (entry.metadata?.category as string | undefined) ?? null
           return {
@@ -593,7 +593,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const lists = this.config?.domain_only_lists ?? []
     for (const listName of lists) {
       try {
-        const entry = await listUtils.matchDomainAgainstList(url, listName)
+        const entry = await matchDomainAgainstList(url, listName)
         if (entry) {
           const hostname = extractHostname(url)
           return {
@@ -621,13 +621,13 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   private backfillTabState(tabId: number, tab: chrome.tabs.Tab | undefined, now: number): TabState {
     const url = tab?.url ?? ''
     const state: TabState = {
-      session_id: makeSessionId(),
-      window_id: tab?.windowId ?? -1,
-      openedAt: now,
-      lastFocusAt: tab?.active ? now : null,
+      sessionId: makeSessionId(),
+      windowId: tab?.windowId ?? -1,
+      openedAtMs: now,
+      lastFocusAtMs: tab?.active ? now : null,
       focusDurationMs: 0,
       currentUrl: url,
-      currentUrlShownAt: now,
+      currentUrlShownAtMs: now,
       currentUrlFocusMs: 0,
       lastTitle: tab?.title ?? '',
       priorUrl: null,
