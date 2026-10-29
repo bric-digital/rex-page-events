@@ -57,8 +57,9 @@ interface RedactionResult {
 export type UrlActiveListener = (event: RexPageUrlActiveEvent) => void
 
 // ---------------------------------------------------------------------------
-// Loose-coupling seam: sibling SW modules (e.g. rex-history) discover us here
-// without taking a build-time dep. `subscribe` returns an unsubscribe function.
+// URL-active subscriptions for other service-worker modules: rex-history finds
+// `subscribeUrlActive` on the global object instead of importing this module.
+// `subscribeUrlActive` returns a function that ends the subscription.
 // ---------------------------------------------------------------------------
 
 const urlActiveListeners: Set<UrlActiveListener> = new Set()
@@ -70,12 +71,8 @@ export function subscribeUrlActive(listener: UrlActiveListener): () => void {
   }
 }
 
-interface UrlActiveSeam {
-  subscribe: typeof subscribeUrlActive
-}
-
-;(globalThis as unknown as { __rexPageEventsUrlActive?: UrlActiveSeam })
-  .__rexPageEventsUrlActive = { subscribe: subscribeUrlActive }
+// @ts-expect-error: __rexPageEventsUrlActive is not defined on the service worker's global object
+self.__rexPageEventsUrlActive = { subscribe: subscribeUrlActive }
 
 // ---------------------------------------------------------------------------
 // Helpers
