@@ -145,16 +145,9 @@ class REXPageEventsModule extends REXClientModule {
   }
 
   private send(message: PageEventMessage): void {
-    try {
-      const result = chrome.runtime.sendMessage(message)
-      if (result && typeof (result as Promise<unknown>).catch === 'function') {
-        ;(result as Promise<unknown>).catch((err: unknown) => {
-          console.debug('[rex-page-events] sendMessage failed', err)
-        })
-      }
-    } catch (err) {
-      console.debug('[rex-page-events] sendMessage threw', err)
-    }
+    chrome.runtime.sendMessage(message).catch((error: unknown) => {
+      console.debug('[rex-page-events] sendMessage failed', error)
+    })
   }
 }
 
