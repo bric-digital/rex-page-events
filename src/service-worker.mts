@@ -7,7 +7,7 @@ import rexCorePlugin, {
 import { matchDomainAgainstList } from '@bric/rex-lists'
 import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
-import { type PageEventMessage, type PageEventType } from './types.mjs'
+import { type PageEventMessage, type PageEventType, type REXPageEventsConfiguration } from './types.mjs'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -20,14 +20,6 @@ const LOG_PREFIX = '[rex-page-events]'
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface PageEventsConfig {
-  enabled: boolean
-  filter_lists?: string[]
-  allow_lists?: string[]
-  domain_only_lists?: string[]
-  debug?: boolean
-}
 
 interface TabState {
   sessionId: string
@@ -86,6 +78,7 @@ function extractHostname(url: string): string {
   }
 }
 
+// TODO: generate session IDs one standard way (rex-page-events #28)
 function makeSessionId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
@@ -98,7 +91,7 @@ function makeSessionId(): string {
 // ---------------------------------------------------------------------------
 
 class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
-  config: PageEventsConfig | null = null
+  config: REXPageEventsConfiguration | null = null
   tabState: Map<number, TabState> = new Map()
   listenersRegistered: boolean = false
 
@@ -115,7 +108,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     rexCorePlugin.fetchConfiguration()
       .then((configuration: REXConfiguration | undefined) => {
         if (configuration !== undefined) {
-          const pageEventsConfig = configuration['page_events'] as PageEventsConfig | undefined
+          const pageEventsConfig = configuration['page_events'] as REXPageEventsConfiguration | undefined
 
           if (pageEventsConfig !== undefined) {
             this.config = pageEventsConfig

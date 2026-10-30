@@ -20,3 +20,12 @@ export interface PageEventMessage {
   persisted?: boolean
   scroll_position?: ScrollPosition
 }
+
+export interface REXPageEventsConfiguration {
+  enabled: boolean
+  filter_lists?: string[]
+  allow_lists?: string[]
+  domain_only_lists?: string[]
+  debug?: boolean
+  scroll_pause_delay?: number
+}
