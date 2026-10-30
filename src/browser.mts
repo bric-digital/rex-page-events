@@ -57,16 +57,6 @@ class REXPageEventsModule extends REXClientModule {
 
     this.watchScroll()
 
-    waitForConfiguration()
-      .then((configuration) => {
-        this.scrollPauseMs = readScrollPauseMs(configuration)
-        this.recordLoad()
-        this.recordScroll()
-      })
-      .catch((error: unknown) => {
-        console.debug('[rex-page-events] no configuration', error)
-      })
-
     window.addEventListener('pageshow', (event: PageTransitionEvent) => {
       this.send({
         messageType: 'pageEvent',
@@ -108,6 +98,16 @@ class REXPageEventsModule extends REXClientModule {
         timestamp: Date.now(),
       })
     })
+
+    waitForConfiguration()
+      .then((configuration) => {
+        this.scrollPauseMs = readScrollPauseMs(configuration)
+        this.recordLoad()
+        this.recordScroll()
+      })
+      .catch((error: unknown) => {
+        console.debug('[rex-page-events] no configuration', error)
+      })
   }
 
   private recordLoad(): void {

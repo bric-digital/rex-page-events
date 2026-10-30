@@ -246,7 +246,7 @@ BRIC defines load, unload and scroll as follows. Each definition names its sourc
   - A position is recorded only after a pause or on leaving, so scrolling down and back up without pausing does not record the furthest point reached. Scroll depth is a lower bound.
   - The `width`, `height`, `document_height` and `document_width` in `scroll_position` are as of the last `scroll` record. Resizing the window, or the page growing as content loads, makes no new record.
   - Scrolls made by the page or the browser, such as a jump to an anchor or a restored position, are recorded like the participant's own.
-  - Scrolling before configuration arrives is not recorded. The pause is read when the page loads; a configuration change applies from the next page load.
+  - Scrolling before configuration arrives is not recorded. The pause is read once configuration arrives; a configuration change applies from the next page load.
 - **Sources:** [CSSOM View, scrolling](https://drafts.csswg.org/cssom-view/#scrolling-events) and [`scrollX`/`scrollY`](https://drafts.csswg.org/cssom-view/#dom-window-scrollx).
 
 ### When a definition changes
@@ -317,7 +317,7 @@ This module reads from the `page_events` section of the backend config.
 | `allow_lists` | string[] | No | `[]` | If set, URLs not on any listed list are replaced with `CATEGORY:NOT_ON_ALLOWLIST`. |
 | `domain_only_lists` | string[] | No | `[]` | Matching URLs are replaced with hostname; title becomes `"DOMAIN ONLY"`. |
 | `debug` | boolean | No | `false` | When `true`, `rex-page-url-active` records are additionally dispatched via the REX event bus so PDK and local-download persist them. Raw URLs leave the extension in this mode — use only for development/debugging. |
-| `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a number above 0 use the default. |
+| `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a finite number above 0 use the default. |
 
 ### Example
 
