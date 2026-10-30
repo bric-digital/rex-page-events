@@ -27,7 +27,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `tab_close` | `chrome.tabs.onRemoved` | Carries `tab_lifetime_ms` and `focus_duration_ms` |
 | `window_close` | `chrome.windows.onRemoved` | Emitted once per window close |
 | `load` | Content-script `window.load`, or Navigation Timing when the script arrives after load | Once per document, at the time `load` began |
-| `scroll` | Content-script `window.scroll`, after a 250 ms pause | Also at the start, on leaving during a pause, and on return from the bfcache |
+| `scroll` | Content-script `window.scroll`, after a pause of `scroll_pause_delay` (250 ms by default) | Also at the start, on leaving during a pause, and on return from the bfcache |
 
 ### Where each field comes from
 
@@ -227,7 +227,7 @@ BRIC defines load, unload and scroll as follows. Each definition names its sourc
 - **Definition:** the page's document has finished loading; recorded once per document.
 - **Browser event:** `load` on `window`. If the content script arrives after the page has loaded, the load is recorded at once, with its time read from Navigation Timing (`loadEventStart`), so a late script still records the real load time.
 - **Not a load:** a return from the back/forward cache (a `page_show` with `persisted: true`), or a same-document navigation such as `history.pushState`.
-- **Limits:** a page left before it finishes loading has no `load`, and neither does a page left before the content script arrives. A page Chrome prerendered (loaded in the background before the participant chose it) records when it finished loading, which may be before the participant saw it; prerendering was not seen on Google results pages searched from the address bar (three searches, 2026-10-26).
+- **Limits:** a page left before it finishes loading has no `load`, and neither does a page left before the content script arrives. A page Chrome prerendered (loaded in the background before the participant chose it) records when it finished loading, which may be before the participant saw it; prerendering was not seen on Google results pages searched from the address bar (three searches, 2026-10-26). Recorded only once configuration has arrived.
 - **Sources:** [HTML, "The end"](https://html.spec.whatwg.org/multipage/parsing.html#the-end); [Navigation Timing Level 2](https://w3c.github.io/navigation-timing/).
 
 ### unload
@@ -239,13 +239,14 @@ BRIC defines load, unload and scroll as follows. Each definition names its sourc
 
 ### scroll
 
-- **Definition:** the page's own scroll position once scrolling has paused for 250 ms. Also recorded when the content script starts (the starting position), when the page is left while a record is waiting, and when the page returns from the back/forward cache.
+- **Definition:** the page's own scroll position once scrolling has paused for `scroll_pause_delay` (250 ms by default). Also recorded once configuration has arrived (the starting position), when the page is left while a record is waiting, and when the page returns from the back/forward cache.
 - **Browser event:** `scroll` on `window`, with a timer restarted on every scroll event.
 - **Limits:**
   - Only the page's own scroll position; scrolling inside an element with its own scroll bar is not recorded.
   - A position is recorded only after a pause or on leaving, so scrolling down and back up without pausing does not record the furthest point reached. Scroll depth is a lower bound.
   - The `width`, `height`, `document_height` and `document_width` in `scroll_position` are as of the last `scroll` record. Resizing the window, or the page growing as content loads, makes no new record.
   - Scrolls made by the page or the browser, such as a jump to an anchor or a restored position, are recorded like the participant's own.
+  - Scrolling before configuration arrives is not recorded. The pause is read when the page loads; a configuration change applies from the next page load.
 - **Sources:** [CSSOM View, scrolling](https://drafts.csswg.org/cssom-view/#scrolling-events) and [`scrollX`/`scrollY`](https://drafts.csswg.org/cssom-view/#dom-window-scrollx).
 
 ### When a definition changes
@@ -316,6 +317,7 @@ This module reads from the `page_events` section of the backend config.
 | `allow_lists` | string[] | No | `[]` | If set, URLs not on any listed list are replaced with `CATEGORY:NOT_ON_ALLOWLIST`. |
 | `domain_only_lists` | string[] | No | `[]` | Matching URLs are replaced with hostname; title becomes `"DOMAIN ONLY"`. |
 | `debug` | boolean | No | `false` | When `true`, `rex-page-url-active` records are additionally dispatched via the REX event bus so PDK and local-download persist them. Raw URLs leave the extension in this mode — use only for development/debugging. |
+| `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a number above 0 use the default. |
 
 ### Example
 

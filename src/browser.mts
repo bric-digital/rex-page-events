@@ -1,8 +1,10 @@
 import { REXClientModule, registerREXModule } from '@bric/rex-core/browser'
 
-import { type PageEventMessage, type ScrollPosition } from './types.mjs'
+import { type PageEventMessage, type REXPageEventsConfiguration, type ScrollPosition } from './types.mjs'
 
-const SCROLL_PAUSE_MS = 250
+const DEFAULT_SCROLL_PAUSE_MS = 250
+const CONFIGURATION_TIMEOUT_MS = 60000
+const CONFIGURATION_GRACE_MS = 1000
 
 function loadStartTime(): number {
   const [navigation] = window.performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
@@ -21,8 +23,31 @@ function scrollPosition(): ScrollPosition {
   }
 }
 
+function waitForConfiguration(): Promise<Record<string, unknown> | undefined> {
+  const answer = chrome.runtime.sendMessage({ messageType: 'waitForConfiguration', event: { timeout: CONFIGURATION_TIMEOUT_MS } })
+  const noAnswer = new Promise<never>((_resolve, reject) => {
+    setTimeout(() => {
+      reject(new Error(`no configuration within ${CONFIGURATION_TIMEOUT_MS} ms`))
+    }, CONFIGURATION_TIMEOUT_MS + CONFIGURATION_GRACE_MS)
+  })
+
+  return Promise.race([answer, noAnswer])
+}
+
+function readScrollPauseMs(configuration: Record<string, unknown> | undefined): number {
+  const pageEvents = configuration?.page_events as REXPageEventsConfiguration | undefined
+  const pauseMs = pageEvents?.scroll_pause_delay
+
+  if (typeof pauseMs === 'number' && Number.isFinite(pauseMs) && pauseMs > 0) {
+    return pauseMs
+  }
+
+  return DEFAULT_SCROLL_PAUSE_MS
+}
+
 class REXPageEventsModule extends REXClientModule {
   private scrollTimer: ReturnType<typeof setTimeout> | null = null
+  private scrollPauseMs: number | null = null
   toString(): string {
     return 'REXPageEventsModule'
   }
@@ -30,8 +55,17 @@ class REXPageEventsModule extends REXClientModule {
   setup() {
     console.log('[rex-page-events] browser setup')
 
-    this.recordLoad()
     this.watchScroll()
+
+    waitForConfiguration()
+      .then((configuration) => {
+        this.scrollPauseMs = readScrollPauseMs(configuration)
+        this.recordLoad()
+        this.recordScroll()
+      })
+      .catch((error: unknown) => {
+        console.debug('[rex-page-events] no configuration', error)
+      })
 
     window.addEventListener('pageshow', (event: PageTransitionEvent) => {
       this.send({
@@ -95,10 +129,10 @@ class REXPageEventsModule extends REXClientModule {
   }
 
   private watchScroll(): void {
-    this.recordScroll()
-
     window.addEventListener('scroll', () => {
-      this.scheduleScroll()
+      if (this.scrollPauseMs !== null) {
+        this.scheduleScroll(this.scrollPauseMs)
+      }
     })
 
     window.addEventListener('pagehide', () => {
@@ -106,13 +140,13 @@ class REXPageEventsModule extends REXClientModule {
     })
 
     window.addEventListener('pageshow', (event: PageTransitionEvent) => {
-      if (event.persisted === true) {
+      if (event.persisted === true && this.scrollPauseMs !== null) {
         this.recordScroll()
       }
     })
   }
 
-  private scheduleScroll(): void {
+  private scheduleScroll(pauseMs: number): void {
     if (this.scrollTimer !== null) {
       clearTimeout(this.scrollTimer)
     }
@@ -120,7 +154,7 @@ class REXPageEventsModule extends REXClientModule {
     this.scrollTimer = setTimeout(() => {
       this.scrollTimer = null
       this.recordScroll()
-    }, SCROLL_PAUSE_MS)
+    }, pauseMs)
   }
 
   private flushScroll(): void {
