@@ -7,7 +7,7 @@ import rexCorePlugin, {
 import { matchDomainAgainstList } from '@bric/rex-lists'
 import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
-import { type PageEventMessage, type PageEventType } from './types.mjs'
+import { type PageEventMessage, type PageEventType, type REXPageEventsConfiguration } from './types.mjs'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -16,18 +16,11 @@ import { type PageEventMessage, type PageEventType } from './types.mjs'
 const EVENT_NAME = 'rex-page-event'
 const URL_ACTIVE_EVENT_NAME = 'rex-page-url-active' as const
 const LOG_PREFIX = '[rex-page-events]'
+const CONFIGURATION_TIMEOUT_MS = 10000
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface PageEventsConfig {
-  enabled: boolean
-  filter_lists?: string[]
-  allow_lists?: string[]
-  domain_only_lists?: string[]
-  debug?: boolean
-}
 
 interface TabState {
   sessionId: string
@@ -86,6 +79,13 @@ function extractHostname(url: string): string {
   }
 }
 
+function waitForConfiguration(): Promise<REXConfiguration | undefined> {
+  return new Promise((resolve) => {
+    rexCorePlugin.handleMessage({ messageType: 'waitForConfiguration', event: { timeout: CONFIGURATION_TIMEOUT_MS } }, null, resolve)
+  })
+}
+
+// TODO: generate session IDs one standard way (rex-page-events #28)
 function makeSessionId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
@@ -98,7 +98,7 @@ function makeSessionId(): string {
 // ---------------------------------------------------------------------------
 
 class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
-  config: PageEventsConfig | null = null
+  config: REXPageEventsConfiguration | null = null
   tabState: Map<number, TabState> = new Map()
   listenersRegistered: boolean = false
 
@@ -112,21 +112,17 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   refreshConfiguration() {
-    rexCorePlugin.fetchConfiguration()
-      .then((configuration: REXConfiguration | undefined) => {
-        if (configuration !== undefined) {
-          const pageEventsConfig = configuration['page_events'] as PageEventsConfig | undefined
+    waitForConfiguration()
+      .then((configuration) => {
+        const pageEventsConfig = configuration?.['page_events'] as REXPageEventsConfiguration | undefined
 
-          if (pageEventsConfig !== undefined) {
-            this.config = pageEventsConfig
-            console.log(`${LOG_PREFIX} config loaded`, pageEventsConfig)
-            return
-          }
+        if (pageEventsConfig !== undefined) {
+          this.config = pageEventsConfig
+          console.log(`${LOG_PREFIX} config loaded`, pageEventsConfig)
         }
-
-        setTimeout(() => {
-          this.refreshConfiguration()
-        }, 1000)
+      })
+      .catch((error: unknown) => {
+        console.debug(`${LOG_PREFIX} no configuration`, error)
       })
   }
 
