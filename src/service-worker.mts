@@ -16,8 +16,7 @@ import { type PageEventMessage, type PageEventType, type REXPageEventsConfigurat
 const EVENT_NAME = 'rex-page-event'
 const URL_ACTIVE_EVENT_NAME = 'rex-page-url-active' as const
 const LOG_PREFIX = '[rex-page-events]'
-const CONFIGURATION_TIMEOUT_MS = 60000
-const CONFIGURATION_GRACE_MS = 1000
+const CONFIGURATION_TIMEOUT_MS = 10000
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,16 +80,9 @@ function extractHostname(url: string): string {
 }
 
 function waitForConfiguration(): Promise<REXConfiguration | undefined> {
-  const answer = new Promise<REXConfiguration | undefined>((resolve) => {
+  return new Promise((resolve) => {
     rexCorePlugin.handleMessage({ messageType: 'waitForConfiguration', event: { timeout: CONFIGURATION_TIMEOUT_MS } }, null, resolve)
   })
-  const noAnswer = new Promise<never>((_resolve, reject) => {
-    setTimeout(() => {
-      reject(new Error(`no configuration within ${CONFIGURATION_TIMEOUT_MS} ms`))
-    }, CONFIGURATION_TIMEOUT_MS + CONFIGURATION_GRACE_MS)
-  })
-
-  return Promise.race([answer, noAnswer])
 }
 
 // TODO: generate session IDs one standard way (rex-page-events #28)

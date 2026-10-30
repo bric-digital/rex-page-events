@@ -3,8 +3,7 @@ import { REXClientModule, registerREXModule } from '@bric/rex-core/browser'
 import { type PageEventMessage, type REXPageEventsConfiguration, type ScrollPosition } from './types.mjs'
 
 const DEFAULT_SCROLL_PAUSE_MS = 250
-const CONFIGURATION_TIMEOUT_MS = 60000
-const CONFIGURATION_GRACE_MS = 1000
+const CONFIGURATION_TIMEOUT_MS = 10000
 
 function loadStartTime(): number {
   const [navigation] = window.performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
@@ -24,14 +23,7 @@ function scrollPosition(): ScrollPosition {
 }
 
 function waitForConfiguration(): Promise<Record<string, unknown> | undefined> {
-  const answer = chrome.runtime.sendMessage({ messageType: 'waitForConfiguration', event: { timeout: CONFIGURATION_TIMEOUT_MS } })
-  const noAnswer = new Promise<never>((_resolve, reject) => {
-    setTimeout(() => {
-      reject(new Error(`no configuration within ${CONFIGURATION_TIMEOUT_MS} ms`))
-    }, CONFIGURATION_TIMEOUT_MS + CONFIGURATION_GRACE_MS)
-  })
-
-  return Promise.race([answer, noAnswer])
+  return chrome.runtime.sendMessage({ messageType: 'waitForConfiguration', event: { timeout: CONFIGURATION_TIMEOUT_MS } })
 }
 
 function readScrollPauseMs(configuration: Record<string, unknown> | undefined): number {
