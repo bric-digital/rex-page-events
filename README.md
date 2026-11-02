@@ -244,7 +244,7 @@ BRIC defines load, unload and scroll as follows. Each definition names its sourc
 - **Limits:**
   - Only the page's own scroll position; scrolling inside an element with its own scroll bar is not recorded.
   - A position is recorded only after a pause or on leaving, so scrolling down and back up without pausing does not record the furthest point reached. Scroll depth is a lower bound.
-  - The `width`, `height`, `document_height` and `document_width` in `scroll_position` are as of the last `scroll` record. Resizing the window, or the page growing as content loads, makes no new record.
+  - The `width`, `height`, `document_height` and `document_width` in `scroll_position` are as of the last `scroll` record. Resizing the window, or the page growing as content loads, makes no new record unless it moves the scroll position. Making the window taller at the bottom of a page moves the position up, and that is recorded like a scroll.
   - Scrolls made by the page or the browser, such as a jump to an anchor or a restored position, are recorded like the participant's own.
   - Scrolling before configuration arrives is not recorded. The pause is read once configuration arrives; a configuration change applies from the next page load.
 - **Sources:** [CSSOM View, scrolling](https://drafts.csswg.org/cssom-view/#scrolling-events) and [`scrollX`/`scrollY`](https://drafts.csswg.org/cssom-view/#dom-window-scrollx).
