@@ -85,6 +85,12 @@ function waitForConfiguration(): Promise<REXConfiguration | undefined> {
   })
 }
 
+function fetchStoredConfiguration(): Promise<REXConfiguration | undefined> {
+  return new Promise((resolve) => {
+    rexCorePlugin.handleMessage({ messageType: 'fetchConfiguration' }, null, resolve)
+  })
+}
+
 // TODO: generate session IDs one standard way (rex-page-events #28)
 function makeSessionId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -101,18 +107,34 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   config: REXPageEventsConfiguration | null = null
   tabState: Map<number, TabState> = new Map()
   listenersRegistered: boolean = false
+  ready: Promise<void> = Promise.resolve()
 
   moduleName() {
     return 'PageEventsModule'
   }
 
   setup() {
+    this.ready = this.restoreAfterStart(this.refreshConfiguration())
     this.registerChromeListeners()
-    this.refreshConfiguration()
   }
 
-  refreshConfiguration() {
-    waitForConfiguration()
+  private async restoreAfterStart(configurationArrived: Promise<void>): Promise<void> {
+    let storedConfiguration: REXConfiguration | undefined
+
+    try {
+      storedConfiguration = await fetchStoredConfiguration()
+    } catch (error: unknown) {
+      console.debug(`${LOG_PREFIX} could not check stored configuration`, error)
+      return
+    }
+
+    if (storedConfiguration !== undefined) {
+      await configurationArrived
+    }
+  }
+
+  refreshConfiguration(): Promise<void> {
+    return waitForConfiguration()
       .then((configuration) => {
         const pageEventsConfig = configuration?.['page_events'] as REXPageEventsConfiguration | undefined
 
@@ -186,6 +208,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   // -------------------------------------------------------------------------
 
   private async onTabCreated(tab: chrome.tabs.Tab) {
+    await this.ready
+
     if (!this.isEnabled() || tab.id === undefined) {
       return
     }
@@ -230,6 +254,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onTabUrlChanged(tabId: number, newUrl: string, tab: chrome.tabs.Tab) {
+    await this.ready
+
     if (!this.isEnabled()) {
       return
     }
@@ -291,6 +317,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onTabRemoved(tabId: number, removeInfo: { windowId: number; isWindowClosing: boolean }) {
+    await this.ready
+
     if (!this.isEnabled()) {
       this.tabState.delete(tabId)
       return
@@ -332,6 +360,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onTabActivated(tabId: number, windowId: number) {
+    await this.ready
+
     if (!this.isEnabled()) {
       return
     }
@@ -359,6 +389,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onWindowFocusChanged(windowId: number) {
+    await this.ready
+
     if (!this.isEnabled()) {
       return
     }
@@ -380,6 +412,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onWindowRemoved(windowId: number) {
+    await this.ready
+
     if (!this.isEnabled()) {
       return
     }
@@ -404,6 +438,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     message: PageEventMessage,
     sender: chrome.runtime.MessageSender
   ) {
+    await this.ready
+
     if (!this.isEnabled() || !message.event_type || sender.tab?.id === undefined) {
       return
     }
