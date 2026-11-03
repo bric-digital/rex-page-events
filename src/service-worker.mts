@@ -17,6 +17,7 @@ const EVENT_NAME = 'rex-page-event'
 const URL_ACTIVE_EVENT_NAME = 'rex-page-url-active' as const
 const LOG_PREFIX = '[rex-page-events]'
 const CONFIGURATION_TIMEOUT_MS = 10000
+const SLOW_HANDLER_WARNING_MS = 10000
 const TAB_STATE_STORAGE_KEY = 'rexPageEventsTabState'
 
 // ---------------------------------------------------------------------------
@@ -118,9 +119,20 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
   private enqueue(handler: () => Promise<void>) {
     this.handlerQueue = this.handlerQueue
-      .then(handler)
+      .then(() => this.runWarningWhenSlow(handler))
       .catch((error: unknown) => {
         console.warn(`${LOG_PREFIX} handler failed`, error)
+      })
+  }
+
+  private runWarningWhenSlow(handler: () => Promise<void>): Promise<void> {
+    const slowWarning = self.setTimeout(() => {
+      console.warn(`${LOG_PREFIX} handler still running after ${SLOW_HANDLER_WARNING_MS} ms`)
+    }, SLOW_HANDLER_WARNING_MS)
+
+    return handler()
+      .finally(() => {
+        self.clearTimeout(slowWarning)
       })
   }
 
