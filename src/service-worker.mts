@@ -17,6 +17,7 @@ const EVENT_NAME = 'rex-page-event'
 const URL_ACTIVE_EVENT_NAME = 'rex-page-url-active' as const
 const LOG_PREFIX = '[rex-page-events]'
 const CONFIGURATION_TIMEOUT_MS = 10000
+const TAB_STATE_STORAGE_KEY = 'rexPageEventsTabState'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -119,6 +120,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async restoreAfterStart(configurationArrived: Promise<void>): Promise<void> {
+    await this.loadSavedTabState()
+
     let storedConfiguration: REXConfiguration | undefined
 
     try {
@@ -251,6 +254,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     // (e.g. rex-history) can link. Raw URL on purpose — redaction happens only on
     // the outbound event bus.
     this.deliverUrlActive(state, tab.id, url, now)
+
+    await this.saveTabState()
   }
 
   private async onTabUrlChanged(tabId: number, newUrl: string, tab: chrome.tabs.Tab) {
@@ -314,6 +319,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     // Announce the new URL so sibling modules can link.
     this.deliverUrlActive(state, tabId, newUrl, now)
+
+    await this.saveTabState()
   }
 
   private async onTabRemoved(tabId: number, removeInfo: { windowId: number; isWindowClosing: boolean }) {
@@ -321,6 +328,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     if (!this.isEnabled()) {
       this.tabState.delete(tabId)
+      await this.saveTabState()
       return
     }
     const now = Date.now()
@@ -357,6 +365,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     )
 
     this.tabState.delete(tabId)
+    await this.saveTabState()
   }
 
   private async onTabActivated(tabId: number, windowId: number) {
@@ -379,13 +388,12 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
 
     const state = this.tabState.get(tabId)
-    if (state === undefined) {
-      return
-    }
-    if (state.lastFocusAtMs === null) {
+    if (state !== undefined && state.lastFocusAtMs === null) {
       state.lastFocusAtMs = now
       await this.emit('tab_focus', state, tabId, state.currentUrl, state.lastTitle, now)
     }
+
+    await this.saveTabState()
   }
 
   private async onWindowFocusChanged(windowId: number) {
@@ -409,6 +417,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
         }
       }
     }
+
+    await this.saveTabState()
   }
 
   private async onWindowRemoved(windowId: number) {
@@ -466,6 +476,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
 
     await this.emit(message.event_type, state, tabId, url, title, now, extras)
+
+    await this.saveTabState()
   }
 
   // -------------------------------------------------------------------------
@@ -645,6 +657,27 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
   private isEnabled(): boolean {
     return this.config !== null && this.config.enabled === true
+  }
+
+  private saveTabState(): Promise<void> {
+    return chrome.storage.session.set({ [TAB_STATE_STORAGE_KEY]: Array.from(this.tabState.entries()) })
+      .catch((error: unknown) => {
+        console.debug(`${LOG_PREFIX} could not save tab state`, error)
+      })
+  }
+
+  private loadSavedTabState(): Promise<void> {
+    return chrome.storage.session.get(TAB_STATE_STORAGE_KEY)
+      .then((saved) => {
+        const entries = saved[TAB_STATE_STORAGE_KEY] as [number, TabState][] | undefined
+
+        if (entries !== undefined) {
+          this.tabState = new Map(entries)
+        }
+      })
+      .catch((error: unknown) => {
+        console.debug(`${LOG_PREFIX} could not load saved tab state`, error)
+      })
   }
 
   private backfillTabState(tabId: number, tab: chrome.tabs.Tab | undefined, now: number): TabState {
