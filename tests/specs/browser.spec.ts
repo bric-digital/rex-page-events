@@ -8,8 +8,8 @@ const SETTLE_MS = 2000
 
 let pageCount = 0
 
-async function startModule(serviceWorker) {
-  await loadConfig(serviceWorker, BASE_CONFIG)
+async function startModule(serviceWorker, config = BASE_CONFIG) {
+  await loadConfig(serviceWorker, config)
   await waitForPageEventsConfig(serviceWorker)
   await resetCaptured(serviceWorker)
 }
@@ -217,6 +217,49 @@ test.describe('REX Page Events in pages', () => {
     expect(scrolls.length).toBe(2)
     expect(scrolls[1].scroll_position.top).toBe((await positionOf(page)).top)
     expect(scrolls[1].scroll_position.top).toBeGreaterThan(0)
+  })
+
+  test('a configured scroll pause delays the record until scrolling has paused that long', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, scroll_pause_delay: 1000 } })
+
+    const { page, url } = await openTestPage(context, TALL_PAGE)
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.mouse.move(200, 200)
+
+    for (let step = 0; step < 10; step += 1) {
+      await page.mouse.wheel(0, 100)
+      await page.waitForTimeout(100)
+    }
+
+    await page.waitForTimeout(500)
+
+    expect((await scrollsOf(serviceWorker, url)).length).toBe(1)
+
+    await page.waitForTimeout(800)
+
+    const scrolls = await scrollsOf(serviceWorker, url)
+
+    expect(scrolls.length).toBe(2)
+    expect(scrolls[1].scroll_position.top).toBe((await positionOf(page)).top)
+  })
+
+  test('a scroll pause that is not a number uses 250 ms', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, scroll_pause_delay: '1000' } })
+
+    const { page, url } = await openTestPage(context, TALL_PAGE)
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.mouse.move(200, 200)
+
+    for (let step = 0; step < 10; step += 1) {
+      await page.mouse.wheel(0, 100)
+      await page.waitForTimeout(100)
+    }
+
+    await page.waitForTimeout(500)
+
+    expect((await scrollsOf(serviceWorker, url)).length).toBe(2)
   })
 
   test('leaving the page during a pause records the position at once (D60)', async ({ context, serviceWorker }) => {
