@@ -108,15 +108,23 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   config: REXPageEventsConfiguration | null = null
   tabState: Map<number, TabState> = new Map()
   listenersRegistered: boolean = false
-  ready: Promise<void> = Promise.resolve()
+  handlerQueue: Promise<void> = Promise.resolve()
 
   moduleName() {
     return 'PageEventsModule'
   }
 
   setup() {
-    this.ready = this.restoreAfterStart(this.refreshConfiguration())
+    this.handlerQueue = this.restoreAfterStart(this.refreshConfiguration())
     this.registerChromeListeners()
+  }
+
+  private enqueue(handler: () => Promise<void>) {
+    this.handlerQueue = this.handlerQueue
+      .then(handler)
+      .catch((error: unknown) => {
+        console.debug(`${LOG_PREFIX} handler failed`, error)
+      })
   }
 
   private async restoreAfterStart(configurationArrived: Promise<void>): Promise<void> {
@@ -157,7 +165,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     sendResponse: (response: unknown) => void
   ): boolean {
     if (message && message.messageType === 'pageEvent') {
-      this.recordPageEvent(message, sender)
+      this.enqueue(() => this.recordPageEvent(message, sender))
       sendResponse({ success: true })
       return true
     }
@@ -175,32 +183,34 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     this.listenersRegistered = true
 
     chrome.tabs.onCreated.addListener((tab) => {
-      this.onTabCreated(tab)
+      this.enqueue(() => this.onTabCreated(tab))
     })
 
     chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (changeInfo.url !== undefined) {
-        this.onTabUrlChanged(tabId, changeInfo.url, tab)
+        const url = changeInfo.url
+
+        this.enqueue(() => this.onTabUrlChanged(tabId, url, tab))
       }
     })
 
     chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
-      this.onTabRemoved(tabId, removeInfo)
+      this.enqueue(() => this.onTabRemoved(tabId, removeInfo))
     })
 
     chrome.tabs.onActivated.addListener((activeInfo) => {
-      this.onTabActivated(activeInfo.tabId, activeInfo.windowId)
+      this.enqueue(() => this.onTabActivated(activeInfo.tabId, activeInfo.windowId))
     })
 
     if (chrome.windows !== undefined) {
       if (chrome.windows.onRemoved !== undefined) {
         chrome.windows.onRemoved.addListener((windowId) => {
-          this.onWindowRemoved(windowId)
+          this.enqueue(() => this.onWindowRemoved(windowId))
         })
       }
       if (chrome.windows.onFocusChanged !== undefined) {
         chrome.windows.onFocusChanged.addListener((windowId) => {
-          this.onWindowFocusChanged(windowId)
+          this.enqueue(() => this.onWindowFocusChanged(windowId))
         })
       }
     }
@@ -211,8 +221,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   // -------------------------------------------------------------------------
 
   private async onTabCreated(tab: chrome.tabs.Tab) {
-    await this.ready
-
     if (!this.isEnabled() || tab.id === undefined) {
       return
     }
@@ -259,8 +267,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onTabUrlChanged(tabId: number, newUrl: string, tab: chrome.tabs.Tab) {
-    await this.ready
-
     if (!this.isEnabled()) {
       return
     }
@@ -324,8 +330,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onTabRemoved(tabId: number, removeInfo: { windowId: number; isWindowClosing: boolean }) {
-    await this.ready
-
     if (!this.isEnabled()) {
       this.tabState.delete(tabId)
       await this.saveTabState()
@@ -369,8 +373,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onTabActivated(tabId: number, windowId: number) {
-    await this.ready
-
     if (!this.isEnabled()) {
       return
     }
@@ -397,8 +399,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onWindowFocusChanged(windowId: number) {
-    await this.ready
-
     if (!this.isEnabled()) {
       return
     }
@@ -422,8 +422,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onWindowRemoved(windowId: number) {
-    await this.ready
-
     if (!this.isEnabled()) {
       return
     }
@@ -448,8 +446,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     message: PageEventMessage,
     sender: chrome.runtime.MessageSender
   ) {
-    await this.ready
-
     if (!this.isEnabled() || !message.event_type || sender.tab?.id === undefined) {
       return
     }
