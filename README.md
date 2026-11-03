@@ -9,6 +9,7 @@ REX module that records page, tab, and window lifecycle events and transmits the
 - Records page_show / page_hide / tab_focus / tab_blur / load / scroll (from content scripts)
 - Records tab_open / tab_url_change / tab_close / window_close (from the service worker)
 - Per-tab session_id (UUID) minted at tab_open, carried on every subsequent event for that tab
+- Tab state is kept in `chrome.storage.session`, so a tab keeps its session_id and durations when Chrome stops and restarts the idle service worker. Session storage is cleared when the browser restarts and when the extension is updated, reloaded or disabled. A tab already open then starts a new session_id at its next address change or page event, with no `tab_open`, and its `tab_lifetime_ms`, focus and dwell times count from that event. A tab closed or brought to the front before then records nothing.
 - `tab_close` events carry `tab_lifetime_ms` and `focus_duration_ms` (accumulated time the tab was actually focused)
 - URL redaction via allow/filter/domain_only lists (same semantics as `rex-history`) — redacted events still record dwell time
 
@@ -234,7 +235,9 @@ BRIC defines load, unload and scroll as follows. Each definition names its sourc
 
 - **Definition:** the page stops being shown in its tab. Every `page_hide` is an unload; no separate event type is recorded.
 - **Why `page_hide`:** Chrome no longer fires `unload` and recommends `pagehide` instead. On a normal navigation away Chrome usually keeps the page in the back/forward cache, so `page_hide` usually carries `persisted: true`; `persisted: false` means the browser did not keep the page.
-- **Limit:** a kept page that the browser discards later produces no further event; a `page_show` with `persisted: true` follows only if the participant returns.
+- **Limits:**
+  - A kept page that the browser discards later produces no further event; a `page_show` with `persisted: true` follows only if the participant returns.
+  - A page left while Chrome had stopped the idle service worker recorded no `page_hide` in testing; the cause is not known. The `tab_url_change` for the same navigation is still recorded.
 - **Sources:** [HTML, "Unload a document"](https://html.spec.whatwg.org/multipage/document-lifecycle.html#unload-a-document); [Chrome, "Deprecating the unload event"](https://developer.chrome.com/docs/web-platform/deprecating-unload); [web.dev, "Back/forward cache"](https://web.dev/articles/bfcache).
 
 ### scroll
