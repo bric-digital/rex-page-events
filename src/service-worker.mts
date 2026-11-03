@@ -86,12 +86,6 @@ function waitForConfiguration(): Promise<REXConfiguration | undefined> {
   })
 }
 
-function fetchStoredConfiguration(): Promise<REXConfiguration | undefined> {
-  return new Promise((resolve) => {
-    rexCorePlugin.handleMessage({ messageType: 'fetchConfiguration' }, null, resolve)
-  })
-}
-
 // TODO: generate session IDs one standard way (rex-page-events #28)
 function makeSessionId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -115,7 +109,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   setup() {
-    this.handlerQueue = this.restoreAfterStart(this.refreshConfiguration())
+    const configurationLoaded = this.refreshConfiguration()
+
+    this.handlerQueue = this.loadSavedTabState()
+      .then(() => this.waitIfConfigurationStored(configurationLoaded))
     this.registerChromeListeners()
   }
 
@@ -127,21 +124,16 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       })
   }
 
-  private async restoreAfterStart(configurationArrived: Promise<void>): Promise<void> {
-    await this.loadSavedTabState()
-
-    let storedConfiguration: REXConfiguration | undefined
-
-    try {
-      storedConfiguration = await fetchStoredConfiguration()
-    } catch (error: unknown) {
-      console.debug(`${LOG_PREFIX} could not check stored configuration`, error)
-      return
-    }
-
-    if (storedConfiguration !== undefined) {
-      await configurationArrived
-    }
+  private waitIfConfigurationStored(configurationLoaded: Promise<void>): Promise<void> {
+    return rexCorePlugin.fetchConfiguration()
+      .then((configuration: REXConfiguration) => {
+        if (configuration !== undefined) {
+          return configurationLoaded
+        }
+      })
+      .catch((error: unknown) => {
+        console.debug(`${LOG_PREFIX} could not check stored configuration`, error)
+      })
   }
 
   refreshConfiguration(): Promise<void> {
