@@ -120,7 +120,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     this.handlerQueue = this.handlerQueue
       .then(handler)
       .catch((error: unknown) => {
-        console.debug(`${LOG_PREFIX} handler failed`, error)
+        console.warn(`${LOG_PREFIX} handler failed`, error)
       })
   }
 
