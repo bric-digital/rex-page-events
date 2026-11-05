@@ -6,8 +6,8 @@ REX module that records page, tab, and window lifecycle events and transmits the
 
 **rex-page-events** tracks when pages appear, disappear, gain focus, lose focus, when tabs open/navigate/close, and when browser windows close. Each observation produces a single event dispatched via `dispatchEvent` in rex-core. URLs can be redacted against lists managed by `rex-lists`, so sensitive sites can be tracked for **dwell time** without capturing the URL or page title.
 
-- Records page_show / page_hide / tab_focus / tab_blur / load / scroll (from content scripts)
-- Records tab_open / tab_url_change / tab_close / window_close (from the service worker)
+- Records page_show / page_hide / load / scroll (from content scripts)
+- Records tab_open / tab_url_change / tab_focus / tab_blur / tab_close / window_close (from the service worker). Focus comes only from the service worker, so it is recorded on every tab, including pages without the content script, and moving focus into a frame inside a page is not a focus change.
 - Per-tab session_id (UUID) minted at tab_open, carried on every subsequent event for that tab
 - Tab state is kept in `chrome.storage.session`, so a tab keeps its session_id and durations when Chrome stops and restarts the idle service worker. Session storage is cleared when the browser restarts and when the extension is updated, reloaded or disabled. A tab already open then starts a new session_id at its next address change or page event, with no `tab_open`, and its `tab_lifetime_ms`, focus and dwell times count from that event. A tab closed or brought to the front before then records nothing.
 - `tab_close` events carry `tab_lifetime_ms` and `focus_duration_ms` (accumulated time the tab was actually focused)
@@ -39,7 +39,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `session_id` | `crypto.randomUUID()` — minted once on `tab_open` (or on first observed event for a tab whose `onCreated` was missed), then attached to every subsequent event for that tab |
 | `tab_id` | `chrome.tabs.*` listeners (the active listener's `tabId` argument), or `sender.tab.id` for content-script-originated events |
 | `window_id` | Same listeners / `sender.tab.windowId` |
-| `url` | For service-worker events: the `chrome.tabs.Tab` handed to the listener. For content-script events (`page_show`, `page_hide`, `tab_focus`, `tab_blur`, `load`, `scroll`): `location.href` captured in the page context. May be replaced by a redaction token — see **Redaction** below. |
+| `url` | For service-worker events: the `chrome.tabs.Tab` handed to the listener. For content-script events (`page_show`, `page_hide`, `load`, `scroll`): `location.href` captured in the page context. May be replaced by a redaction token — see **Redaction** below. |
 | `title` | Same two sources as `url` (`tab.title` in the service worker, `document.title` in the page). Omitted entirely when the URL is redacted by an allow- or filter-list. |
 | `timestamp`, `date` | `Date.now()`, captured once per event and assigned to both fields (PDK expects `date`; we also surface it under `timestamp` for clarity). For `load`, the time `load` began (`performance.timeOrigin + loadEventStart`) |
 | `filtered` | `true` iff any list matched or the URL failed an allow-list check — see **Redaction** |
@@ -396,7 +396,7 @@ The `extended` specs:
 
 - `service-worker.spec.ts`: verifies tab_open, tab_url_change (describing the outgoing URL), tab_close lifetime stats, the url-active seam, and that `enabled: false` suppresses events.
 - `window-focus.spec.ts`: verifies that focusing another window blurs the tab in the window that lost focus and focuses the active tab of the one that gained it, and that a window regaining focus after the browser lost it restarts its active tab's focus. Playwright's Chromium fires no `windows.onFocusChanged`, so these tests pass the module the event Chrome sends; a real window switch is checked by hand.
-- `browser.spec.ts`: loads the browser part through rex-core's own injection and verifies page_hide's `persisted` flag on leaving a page the browser caches and one it does not, `load` when the script arrives before and after load, `scroll` at the start, after a pause, on leaving and on return from the bfcache, and the order of `scroll`, `page_hide` and `tab_close` when a tab is closed. Tests that need the bfcache set the fixture option `backForwardCache`, because Playwright otherwise starts Chromium with it disabled.
+- `browser.spec.ts`: loads the browser part through rex-core's own injection and verifies page_hide's `persisted` flag on leaving a page the browser caches and one it does not, `load` when the script arrives before and after load, `scroll` at the start, after a pause, on leaving and on return from the bfcache, and the order of `scroll`, `page_hide` and `tab_close` when a tab is closed. Tests that need the bfcache set the fixture option `backForwardCache`, because Playwright otherwise starts Chromium with it disabled. It also verifies that moving focus into a frame inside a page and back records no focus change.
 - `service-worker-restart.spec.ts`: verifies that tab state survives Chrome stopping and restarting the idle service worker.
 - `slow-handler.spec.ts`: verifies that a handler that never finishes logs a warning, and that handlers that finish do not.
 

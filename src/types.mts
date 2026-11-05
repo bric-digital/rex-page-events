@@ -1,6 +1,6 @@
-export type BrowserEventType = 'page_show' | 'page_hide' | 'tab_focus' | 'tab_blur' | 'load' | 'scroll'
+export type BrowserEventType = 'page_show' | 'page_hide' | 'load' | 'scroll'
 
-export type PageEventType = BrowserEventType | 'tab_open' | 'tab_url_change' | 'tab_close' | 'window_close'
+export type PageEventType = BrowserEventType | 'tab_open' | 'tab_url_change' | 'tab_focus' | 'tab_blur' | 'tab_close' | 'window_close'
 
 export interface ScrollPosition {
   top: number
