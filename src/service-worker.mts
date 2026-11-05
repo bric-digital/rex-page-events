@@ -81,12 +81,6 @@ function extractHostname(url: string): string {
   }
 }
 
-function waitForConfiguration(): Promise<REXConfiguration | undefined> {
-  return new Promise((resolve) => {
-    rexCorePlugin.handleMessage({ messageType: 'waitForConfiguration', event: { timeout: CONFIGURATION_TIMEOUT_MS } }, null, resolve)
-  })
-}
-
 // TODO: generate session IDs one standard way (rex-page-events #28)
 function makeSessionId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -110,10 +104,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   setup() {
-    const configurationLoaded = this.refreshConfiguration()
+    this.refreshConfiguration()
 
-    this.handlerQueue = this.loadSavedTabState()
-      .then(() => this.waitIfConfigurationStored(configurationLoaded))
+    this.handlerQueue = Promise.all([this.loadSavedTabState(), this.loadStoredConfiguration()])
+      .then(() => undefined)
     this.registerChromeListeners()
   }
 
@@ -136,31 +130,32 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       })
   }
 
-  private waitIfConfigurationStored(configurationLoaded: Promise<void>): Promise<void> {
+  private loadStoredConfiguration(): Promise<void> {
     return rexCorePlugin.fetchConfiguration()
       .then((configuration: REXConfiguration) => {
-        if (configuration !== undefined) {
-          return configurationLoaded
-        }
+        this.applyConfiguration(configuration)
       })
       .catch((error: unknown) => {
-        console.debug(`${LOG_PREFIX} could not check stored configuration`, error)
+        console.debug(`${LOG_PREFIX} could not read stored configuration`, error)
       })
   }
 
-  refreshConfiguration(): Promise<void> {
-    return waitForConfiguration()
-      .then((configuration) => {
-        const pageEventsConfig = configuration?.['page_events'] as REXPageEventsConfiguration | undefined
+  refreshConfiguration() {
+    rexCorePlugin.handleMessage({
+      messageType: 'waitForConfiguration',
+      event: { timeout: CONFIGURATION_TIMEOUT_MS }
+    }, null, (configuration: REXConfiguration) => {
+      this.applyConfiguration(configuration)
+    })
+  }
 
-        if (pageEventsConfig !== undefined) {
-          this.config = pageEventsConfig
-          console.log(`${LOG_PREFIX} config loaded`, pageEventsConfig)
-        }
-      })
-      .catch((error: unknown) => {
-        console.debug(`${LOG_PREFIX} no configuration`, error)
-      })
+  private applyConfiguration(configuration: REXConfiguration | undefined) {
+    const pageEventsConfig = configuration?.['page_events'] as REXPageEventsConfiguration | undefined
+
+    if (pageEventsConfig !== undefined) {
+      this.config = pageEventsConfig
+      console.log(`${LOG_PREFIX} config loaded`, pageEventsConfig)
+    }
   }
 
   handleMessage(

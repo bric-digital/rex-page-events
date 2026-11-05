@@ -6,6 +6,7 @@ const TEST_ORIGIN = 'https://pages.test'
 const SETTLE_MS = 2000
 const TALL_PAGE = '<div style="height: 5000px">Tall page</div>'
 const QUEUE_ALLOWANCE_MS = 500
+const SLOW_CONFIGURATION_READ_MS = 1500
 
 interface CapturedEvent {
   event_type?: string
@@ -199,6 +200,25 @@ test.describe('Service worker restart', () => {
     await probe.waitForTimeout(SETTLE_MS)
 
     const afterStop = await restartedCapturedEvents(context, probe)
+
+    expect(tabId).toBeDefined()
+    expect(afterStop.filter((event) => event.event_type === 'tab_url_change' && event.tab_id === tabId)).toHaveLength(1)
+  })
+
+  test('the tab event that wakes a stopped worker waits for a slow configuration read', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const probe = await context.newPage()
+    const { page, url } = await openTestPage(context, TALL_PAGE)
+    await page.waitForTimeout(SETTLE_MS)
+
+    const tabId = tabIdOf(await capturedBeforeStop(serviceWorker), url)
+
+    await serviceWorker.evaluate(`chrome.storage.session.set({ testConfigurationReadDelayMs: ${SLOW_CONFIGURATION_READ_MS} })`)
+    await stopServiceWorker(context, probe)
+    await page.goto(`${TEST_ORIGIN}/next`)
+
+    const afterStop = await waitForRestartedRecord(context, probe, (event) => event.event_type === 'tab_url_change')
 
     expect(tabId).toBeDefined()
     expect(afterStop.filter((event) => event.event_type === 'tab_url_change' && event.tab_id === tabId)).toHaveLength(1)

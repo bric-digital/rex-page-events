@@ -1,5 +1,6 @@
 // @ts-nocheck
 
+import './slow-configuration'
 import rexCorePlugin, {
   registerREXModule,
   REXServiceWorkerModule,
