@@ -409,16 +409,24 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const now = Date.now()
     const windowLost = windowId === chrome.windows.WINDOW_ID_NONE
 
-    if (windowLost) {
-      // Blur every focused tab.
-      for (const [tabId, state] of this.tabState.entries()) {
-        if (state.lastFocusAtMs !== null) {
-          const fragment = now - state.lastFocusAtMs
-          state.focusDurationMs += fragment
-          state.currentUrlFocusMs += fragment
-          state.lastFocusAtMs = null
-          await this.emit('tab_blur', state, tabId, state.currentUrl, state.lastTitle, now)
-        }
+    // Blur every focused tab outside the window that now has focus; when no window has focus, every focused tab.
+    for (const [tabId, state] of this.tabState.entries()) {
+      if (state.lastFocusAtMs !== null && (windowLost || state.windowId !== windowId)) {
+        const fragment = now - state.lastFocusAtMs
+        state.focusDurationMs += fragment
+        state.currentUrlFocusMs += fragment
+        state.lastFocusAtMs = null
+        await this.emit('tab_blur', state, tabId, state.currentUrl, state.lastTitle, now)
+      }
+    }
+
+    if (windowLost === false) {
+      const [activeTab] = await chrome.tabs.query({ active: true, windowId })
+      const state = activeTab?.id === undefined ? undefined : this.tabState.get(activeTab.id)
+
+      if (activeTab?.id !== undefined && state !== undefined && state.lastFocusAtMs === null) {
+        state.lastFocusAtMs = now
+        await this.emit('tab_focus', state, activeTab.id, state.currentUrl, state.lastTitle, now)
       }
     }
 
