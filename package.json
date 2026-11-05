@@ -23,17 +23,22 @@
     "scripts": {
         "build": "tsc",
         "lint": "eslint src",
-        "pretest": "node tests/scripts/build-test-bundle.js",
+        "pretest": "node tests/scripts/build-test-bundle.js && node tests/extended/scripts/build-test-bundle.js",
         "test": "playwright test",
         "test:ci": "npm run pretest && playwright test --reporter=dot",
         "test:debug": "playwright test --debug",
         "test:headed": "playwright test --headed",
         "test:ui": "playwright test --ui",
-        "test:unit": "playwright test specs/"
+        "test:unit": "playwright test specs/",
+        "server": "node tests/scripts/run-server.js"
     },
     "dependencies": {
         "@bric/rex-core": "github:bric-digital/rex-core",
         "@bric/rex-lists": "github:bric-digital/rex-lists",
         "@bric/rex-types": "github:bric-digital/rex-types"
+    },
+    "devDependencies": {
+        "@playwright/test": "1.64.1",
+        "express": "^5.3.0"
     }
 }
