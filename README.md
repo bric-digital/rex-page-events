@@ -385,10 +385,19 @@ npm install
 npm test
 ```
 
-`pretest` bundles the test extension's service worker and browser part; `npm test` then runs the Playwright spec suite under `tests/specs/`:
+`pretest` bundles both test extensions; `npm test` then runs two Playwright projects from one configuration:
+
+- `chromium`: the specs under `tests/specs/`, against the test extension in `tests/extension/` with pages served by a local Express server (`tests/scripts/run-server.js`).
+- `extended`: the specs under `tests/extended/specs/`, against their own test extension in `tests/extended/extension/`, which exposes the recorded events to the tests. Over time these move into `tests/specs/` in that set's style.
+
+Run one set with `npx playwright test --project=chromium` or `--project=extended`.
+
+The `extended` specs:
 
 - `service-worker.spec.ts`: verifies tab_open, tab_url_change (describing the outgoing URL), tab_close lifetime stats, the url-active seam, and that `enabled: false` suppresses events.
 - `browser.spec.ts`: loads the browser part through rex-core's own injection and verifies page_hide's `persisted` flag on leaving a page the browser caches and one it does not, `load` when the script arrives before and after load, `scroll` at the start, after a pause, on leaving and on return from the bfcache, and the order of `scroll`, `page_hide` and `tab_close` when a tab is closed. Tests that need the bfcache set the fixture option `backForwardCache`, because Playwright otherwise starts Chromium with it disabled.
+- `service-worker-restart.spec.ts`: verifies that tab state survives Chrome stopping and restarting the idle service worker.
+- `slow-handler.spec.ts`: verifies that a handler that never finishes logs a warning, and that handlers that finish do not.
 
 Add coverage here when changing behavior.
 

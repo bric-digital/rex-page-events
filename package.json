@@ -23,7 +23,7 @@
     "scripts": {
         "build": "tsc",
         "lint": "eslint src",
-        "pretest": "node tests/scripts/build-test-bundle.js",
+        "pretest": "node tests/scripts/build-test-bundle.js && node tests/extended/scripts/build-test-bundle.js",
         "test": "playwright test",
         "test:ci": "npm run pretest && playwright test --reporter=dot",
         "test:debug": "playwright test --debug",

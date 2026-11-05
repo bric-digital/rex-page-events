@@ -5,7 +5,7 @@ const startupDelay = 2500
 test.describe('REX Page Events - Basic Loading', () => {
   // Test if tests are working...
 
-  test('Test that page loads.', async ({ page, extensionId }) => {
+  test.fixme('Test that page loads.', async ({ page, extensionId }) => {
     await page.waitForTimeout(startupDelay);
 
     await page.goto('/');

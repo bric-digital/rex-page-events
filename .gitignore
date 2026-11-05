@@ -144,5 +144,7 @@ playwright-report/
 tests/extension/js/
 tests/build/
 tests/src/build/
+tests/extended/extension/js/
+tests/extended/build/
 
 .DS_Store
