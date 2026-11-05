@@ -27,6 +27,7 @@ test.describe('Window focus', () => {
     const windows = await openTwoWindows(serviceWorker)
     const tabIds = [windows.first.tabId, windows.second.tabId]
     await serviceWorker.evaluate(() => new Promise((resolve) => setTimeout(resolve, 1000)))
+    await serviceWorker.evaluate((windowId) => self.rexPageEventsPlugin.onWindowFocusChanged(windowId), windows.second.windowId)
     await resetCaptured(serviceWorker)
 
     await serviceWorker.evaluate((windowId) => self.rexPageEventsPlugin.onWindowFocusChanged(windowId), windows.first.windowId)
