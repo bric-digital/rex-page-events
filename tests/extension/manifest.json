@@ -23,5 +23,9 @@
   "background": {
     "service_worker": "js/serviceWorker/bundle.js",
     "type": "module"
+  }, "externally_connectable": {
+    "matches": [
+      "http://localhost:9090/*"
+    ]
   }
 }

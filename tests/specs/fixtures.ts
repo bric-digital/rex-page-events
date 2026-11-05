@@ -5,13 +5,11 @@ import path from 'path'
 import { fileURLToPath } from 'url';
 
 export const test = base.extend<{
-  backForwardCache: boolean
   context: BrowserContext
   extensionId: string,
   serviceWorker:ServiceWorker,
 }>({
-  backForwardCache: [false, { option: true }],
-  context: async ({ backForwardCache }, use) => {
+  context: async ({ }, use) => {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
 
@@ -19,22 +17,34 @@ export const test = base.extend<{
 
     const context = await chromium.launchPersistentContext('', {
       channel: 'chromium',
-      ignoreDefaultArgs: backForwardCache === true ? ['--disable-back-forward-cache'] : [],
       args: [
         `--disable-extensions-except=${pathToExtension}`,
         `--load-extension=${pathToExtension}`,
+        `--enable-features=DeclarativeNetRequestFeedback`,
       ],
     });
 
-    await use(context)
-    await context.close()
+    context.on('console', msg => {
+      console.log(`[browser]: ${msg.text()}`);
+    })
+
+    use(context)
+      .then(() => {
+        setTimeout(() => {
+          context.close();
+        }, 10000)
+    })
   },
   extensionId: async ({ context }, use) => {
+    // for manifest v3:
     let [serviceWorker] = context.serviceWorkers();
     if (!serviceWorker)
       serviceWorker = await context.waitForEvent('serviceworker');
 
     const extensionId = serviceWorker.url().split('/')[2];
+
+    console.log(`Extension ID: ${extensionId}`)
+
     await use(extensionId);
   },
   serviceWorker: async ({ context }, use) => {
@@ -43,54 +53,14 @@ export const test = base.extend<{
       serviceWorker = await context.waitForEvent('serviceworker');
     }
 
-    await use(serviceWorker)
+    use(serviceWorker)
+      .then(() => {
+        // context.close();
+        setTimeout(() => {
+          context.close();
+        }, 10000)
+    })
   },
 });
 
 export const expect = test.expect;
-
-export const BASE_CONFIG = {
-  configuration_url: 'config.json',
-  identifier: 'rex-page-events-test',
-  page_events: {
-    enabled: true,
-  },
-  ui: [{
-    title: 'Test',
-    identifier: 'main',
-    default: true,
-  }],
-}
-
-export async function loadConfig(serviceWorker, config) {
-  return serviceWorker.evaluate(async (configArg) => {
-    return new Promise((resolve) => {
-      self.rexCorePlugin.handleMessage({
-        messageType: 'loadInitialConfiguration',
-        configuration: configArg,
-      }, this, (response) => resolve(response))
-    })
-  }, config)
-}
-
-export async function waitForPageEventsConfig(serviceWorker) {
-  await serviceWorker.evaluate(async () => {
-    return new Promise((resolve) => {
-      const check = () => {
-        if (self.rexPageEventsPlugin?.config) {
-          resolve()
-        } else {
-          setTimeout(check, 100)
-        }
-      }
-      check()
-    })
-  })
-}
-
-export async function resetCaptured(serviceWorker) {
-  await serviceWorker.evaluate(() => {
-    self.__capturedEvents = []
-    self.__capturedUrlActive = []
-  })
-}
