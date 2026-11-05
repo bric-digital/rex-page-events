@@ -1,15 +1,17 @@
-import { gunzipSync } from 'node:zlib';
-import { Buffer } from 'node:buffer';
-
 import express from 'express'
+
+import path from 'path'
 
 const app = express();
 const port = 9090;
 
+app.use(express.static(path.join(import.meta.dirname, 'pages')))
+
 app.get('/', (request, response) => {
-  response.send('The only way to pass a test is to take the test. <div id="rex_here">NO</div>')
+  response.send('Don\'t delete me or Playwright gets confused.')
 })
 
+
 app.listen(port, () => {
-  console.log(`Server running on port ${port}...`);
+  console.log(`Server running on port ${port}...`)
 })

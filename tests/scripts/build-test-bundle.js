@@ -24,10 +24,10 @@ const modules = [
     name: 'service-worker',
     input: join(srcDir, 'service-worker.ts'),
     output: join(outputDir, '../extension/js/serviceWorker/bundle.js')
-  // }, {
-  //   name: 'extension',
-  //   input: join(srcDir, 'extension.ts'),
-  //   output: join(outputDir, '../extension/js/extension/bundle.js')
+  }, {
+    name: 'extension',
+    input: join(srcDir, 'extension.ts'),
+    output: join(outputDir, '../extension/js/extension/bundle.js')
   }, {
     name: 'browser',
     input: join(srcDir, 'browser.ts'),

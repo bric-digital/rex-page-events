@@ -110,11 +110,20 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   setup() {
-    const configurationLoaded = this.refreshConfiguration()
+    console.log('in setup')
+    this.refreshConfiguration()
 
-    this.handlerQueue = this.loadSavedTabState()
-      .then(() => this.waitIfConfigurationStored(configurationLoaded))
-    this.registerChromeListeners()
+    console.log('did refreshConfiguration')
+    // this.handlerQueue = this.loadSavedTabState()
+    //   .then(() => this.waitIfConfigurationStored(configurationLoaded))
+    // this.registerChromeListeners()
+
+    console.log('doing loadSavedTabState')
+    this.loadSavedTabState().then(() => {
+      console.log('did loadSavedTabState')
+      this.registerChromeListeners()
+      console.log('did registerChromeListeners')
+    })
   }
 
   private enqueue(handler: () => Promise<void>) {
@@ -148,7 +157,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       })
   }
 
-  refreshConfiguration(): Promise<void> {
+  refreshConfigurationOld(): Promise<void> {
     return waitForConfiguration()
       .then((configuration) => {
         const pageEventsConfig = configuration?.['page_events'] as REXPageEventsConfiguration | undefined
@@ -161,6 +170,26 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       .catch((error: unknown) => {
         console.debug(`${LOG_PREFIX} no configuration`, error)
       })
+  }
+
+  refreshConfiguration() {
+    console.log('sending waitForConfiguration')
+    rexCorePlugin.handleMessage({ 
+      messageType: 'waitForConfiguration', 
+      event: { timeout: CONFIGURATION_TIMEOUT_MS } 
+    }, null, (configuration:REXConfiguration) => {
+      console.log('got config')
+      console.log(configuration)
+
+      const pageEventsConfig = configuration?.['page_events'] as REXPageEventsConfiguration | undefined
+      
+      if (pageEventsConfig !== undefined) {
+        console.log('got page config')
+        console.log(pageEventsConfig)
+        this.config = pageEventsConfig
+        console.log(`${LOG_PREFIX} config loaded`, pageEventsConfig)
+      }
+    })
   }
 
   handleMessage(

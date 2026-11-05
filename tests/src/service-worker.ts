@@ -26,6 +26,9 @@ class TestPageEventsModule extends REXServiceWorkerModule {
   }
 
   logEvent(event:any) {
+    console.log('logEvent')
+    console.log(event)
+
     if (event !== undefined) {
       if (['', null, undefined].includes(event['name']) == false) {
         this.loggedEvents.push(event)
