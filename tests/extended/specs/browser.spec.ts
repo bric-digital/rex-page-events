@@ -356,6 +356,22 @@ test.describe('REX Page Events in pages', () => {
     expect(await page.evaluate(() => document.getElementById('box').scrollTop)).toBe(1000)
     expect((await scrollsOf(serviceWorker, url)).length).toBe(1)
   })
+
+  test('moving focus into an embedded frame and back records no focus change', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, '<button id="own">Own</button><iframe srcdoc="<button id=inner>Inner</button>"></iframe>')
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.frameLocator('iframe').locator('#inner').click()
+    await page.click('#own')
+    await page.waitForTimeout(1000)
+
+    const pageEvents = (await capturedEvents(serviceWorker)).filter((event) => event.url === url)
+
+    expect(pageEvents.map((event) => event.event_type)).toContain('load')
+    expect(pageEvents.filter((event) => ['tab_focus', 'tab_blur'].includes(event.event_type))).toEqual([])
+  })
 })
 
 test.describe('REX Page Events in pages the browser caches', () => {

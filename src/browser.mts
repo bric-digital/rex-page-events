@@ -71,26 +71,6 @@ class REXPageEventsModule extends REXClientModule {
       })
     })
 
-    window.addEventListener('focus', () => {
-      this.send({
-        messageType: 'pageEvent',
-        event_type: 'tab_focus',
-        url: location.href,
-        title: document.title,
-        timestamp: Date.now(),
-      })
-    })
-
-    window.addEventListener('blur', () => {
-      this.send({
-        messageType: 'pageEvent',
-        event_type: 'tab_blur',
-        url: location.href,
-        title: document.title,
-        timestamp: Date.now(),
-      })
-    })
-
     waitForConfiguration()
       .then((configuration) => {
         this.scrollPauseMs = readScrollPauseMs(configuration)
