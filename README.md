@@ -387,7 +387,7 @@ npm test
 
 `pretest` bundles both test extensions; `npm test` then runs two Playwright projects from one configuration:
 
-- `chromium`: the specs under `tests/specs/`, against the test extension in `tests/extension/` with pages served by a local Express server (`tests/scripts/run-server.js`).
+- `chromium`: the specs under `tests/specs/`, against the test extension in `tests/extension/` with pages served by a local Express server (`tests/scripts/run-server.js`) from `tests/scripts/pages/`. A new page for a test is a new HTML file there.
 - `extended`: the specs under `tests/extended/specs/`, against their own test extension in `tests/extended/extension/`, which exposes the recorded events to the tests. Over time these move into `tests/specs/` in that set's style.
 
 Run one set with `npx playwright test --project=chromium` or `--project=extended`.
