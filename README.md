@@ -6,17 +6,17 @@ REX module that records page, tab, and window lifecycle events and transmits the
 
 **rex-page-events** tracks when pages appear, disappear, gain focus, lose focus, when tabs open/navigate/close, and when browser windows close. Each observation produces a single event dispatched via `dispatchEvent` in rex-core. URLs can be redacted against lists managed by `rex-lists`, so sensitive sites can be tracked for **dwell time** without capturing the URL or page title.
 
-- Records page_show / page_hide / load / scroll (from content scripts)
+- Records page_show / page_hide / load / scroll / click (from content scripts)
 - Records tab_open / tab_url_change / tab_focus / tab_blur / tab_close / window_close (from the service worker). Focus comes only from the service worker, so it is recorded on every tab, including pages without the content script, and moving focus into a frame inside a page is not a focus change.
 - Per-tab session_id (UUID) minted at tab_open, carried on every subsequent event for that tab
 - Tab state is kept in `chrome.storage.session`, so a tab keeps its session_id and durations when Chrome stops and restarts the idle service worker. Session storage is cleared when the browser restarts and when the extension is updated, reloaded or disabled. A tab already open then starts a new session_id at its next address change or page event, with no `tab_open`, and its `tab_lifetime_ms`, focus and dwell times count from that event. A tab closed or brought to the front before then records nothing.
 - `tab_close` events carry `tab_lifetime_ms` and `focus_duration_ms` (accumulated time the tab was actually focused)
 - URL redaction via allow/filter/domain_only lists — redacted events still record dwell time. Every address is hidden until `allow_lists` or `allow_all` allows it.
-- Each event type can be switched off in configuration; all are on by default
+- Each event type can be switched off in configuration; all are on by default except `link_follow`, which is off by default. `link_follow` and `link_follow_end` are reserved for link following, which nothing records yet
 
 ## Event Schema
 
-Every event shares the name `rex-page-event` and is distinguished by `event_type`. There are ten event types in the current implementation.
+Every event shares the name `rex-page-event` and is distinguished by `event_type`. There are eleven event types in the current implementation.
 
 | `event_type` | Source | Notes |
 |---|---|---|
@@ -30,18 +30,19 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `window_close` | `chrome.windows.onRemoved` | Emitted once per window close |
 | `load` | Content-script `window.load`, or Navigation Timing when the script arrives after load | Once per document, at the time `load` began |
 | `scroll` | Content-script `window.scroll`, after a pause of `scroll_pause_delay` (250 ms by default) | Also at the start, on leaving during a pause, and on return from the bfcache |
+| `click` | Content-script `click`, `contextmenu` and `auxclick`, in the capture phase | One record per button press, on a link or not; carries `click_type`, `modifier_keys` and link metadata |
 
 ### Where each field comes from
 
 | Field | Source |
 |---|---|
 | `name` | Hardcoded: `"rex-page-event"` for every event |
-| `event_type` | One of the ten types in the table above |
+| `event_type` | One of the eleven types in the table above |
 | `session_id` | `crypto.randomUUID()` — minted once on `tab_open` (or on first observed event for a tab whose `onCreated` was missed), then attached to every subsequent event for that tab |
 | `tab_id` | `chrome.tabs.*` listeners (the active listener's `tabId` argument), or `sender.tab.id` for content-script-originated events |
 | `window_id` | Same listeners / `sender.tab.windowId` |
-| `url` | For service-worker events: the `chrome.tabs.Tab` handed to the listener. For content-script events (`page_show`, `page_hide`, `load`, `scroll`): `location.href` captured in the page context. May be replaced by a redaction token — see **Redaction** below. |
-| `title` | Same two sources as `url` (`tab.title` in the service worker, `document.title` in the page). Omitted entirely when the URL is redacted by an allow- or filter-list. |
+| `url` | For service-worker events: the `chrome.tabs.Tab` handed to the listener. For content-script events (`page_show`, `page_hide`, `load`, `scroll`, `click`): `location.href` captured in the page context. May be replaced by a redaction token — see **Redaction** below. |
+| `title` | Same two sources as `url` (`tab.title` in the service worker, `document.title` in the page). Omitted entirely when the URL is redacted by an allow- or filter-list; `"DOMAIN ONLY"` when it is redacted by a domain-only list. |
 | `timestamp`, `date` | `Date.now()`, captured once per event and assigned to both fields (PDK expects `date`; we also surface it under `timestamp` for clarity). For `load`, the time `load` began (`performance.timeOrigin + loadEventStart`) |
 | `filtered` | `true` iff any list matched or the URL failed an allow-list check — see **Redaction** |
 | `filtered_by_list` | Present only when `filtered: true`: the list name that caused the redaction (or `"NOT_ON_ALLOWLIST"` for allow-list rejections) |
@@ -224,7 +225,7 @@ URL fragments are matched **exactly**: `https://a/#x` and `https://a/#y` are tre
 
 ## Event definitions
 
-BRIC defines load, unload and scroll as follows. Each definition names its source, and changes when one of the conditions under **When a definition changes** applies.
+BRIC defines load, unload, scroll and click as follows. Each definition names its source, and changes when one of the conditions under **When a definition changes** applies.
 
 ### load
 
@@ -254,6 +255,38 @@ BRIC defines load, unload and scroll as follows. Each definition names its sourc
   - Scrolls made by the page or the browser, such as a jump to an anchor or a restored position, are recorded like the participant's own.
   - Scrolling before configuration arrives is not recorded. The pause is read once configuration arrives; a configuration change applies from the next page load.
 - **Sources:** [CSSOM View, scrolling](https://drafts.csswg.org/cssom-view/#scrolling-events) and [`scrollX`/`scrollY`](https://drafts.csswg.org/cssom-view/#dom-window-scrollx).
+
+### click
+
+- **Definition:** one press of a mouse button on the page, with any button, on a link or not. Each press is recorded once, from one browser event:
+  - a primary click, with or without Shift or Command, is `click`;
+  - a right click, and a Mac Control-click (button 0 with Control held), is `contextmenu`, recorded as `click_type: right`;
+  - `auxclick` is recorded only for the middle button and other buttons, such as a mouse's back and forward buttons, so a right click on Windows, where Chrome also fires `auxclick` after the menu, is still one record.
+- **Fields:** `click_id`, `click_type` (`primary`, `middle`, `right` or `other`), `button` (the browser's button number), `modifier_keys` (any of `shift`, `control`, `alt`, `meta`), `click_count` (1 for a single click, 2 for the second click of a double click), `on_link`, `claimed` (`true` only when another module claimed the click; see below), and the usual `url`, `session_id`, `tab_id` and `timestamp`.
+- **Link metadata:** for a click on or inside a link (`a[href]`), `link_url` (the absolute address, redacted like `url`), `link_text` (the visible text with whitespace collapsed, trimmed, at most 200 characters) and `link_target` (the `target` attribute, when it has one). `link_text` is left out when the page's address is hidden for any reason, including a domain-only list, where `title` becomes `"DOMAIN ONLY"`. On a page whose address is kept, a link whose own address the lists hide is recorded as `hidden_link_mode` decides (see **Configuration**); a link whose address the lists keep is unaffected by the mode.
+- **Passive:** the listener never calls `preventDefault` or `stopPropagation` and never delays navigation.
+- **Limits:**
+  - A click that a page script stops during the capture phase before it reaches this listener is not recorded.
+  - A record is made for each activation the page part sees, not only mouse presses: Enter or Space on a link or button (`click_count` 1), and a script's `element.click()` or `dispatchEvent`. A click on a `<label>` may also make a second record; this has not been verified in Chrome.
+  - Controls that are not links, such as buttons that script turns into navigation, record `on_link: false`.
+  - Links inside a shadow root record `on_link: false`.
+
+### Click IDs and claims for other modules
+
+Other modules in the same page part can tie their own work to a click, and say where it leads. Both functions are named exports of `@bric/rex-page-events/browser`:
+
+```ts
+import { claimClick, clickIdFor } from '@bric/rex-page-events/browser'
+
+clickIdFor(event: Event): string
+claimClick(clickId: string, claim?: ClickClaim): void
+```
+
+- `clickIdFor(event)` returns the same ID for one DOM event, whoever calls it and in whatever order. It is the `click_id` of that click's record.
+- `claimClick(clickId, claim)` attaches a `ClickClaim` (`destination_url`, optional) to the click. A second claim for the same ID is merged into the first.
+- Each click is sent once, at the first of a `setTimeout(0)` scheduled from the capture listener and `pagehide`. A claim made before then, for example from a `document` capture listener, is recorded on the stored `click` as `claimed: true`; the claim itself, including any `destination_url`, is never stored. A claim made after the click is sent is not recorded.
+- Sending does not depend on any bubble-phase listener, so a page that stops propagation still has its click recorded once.
+- A module that uses `clickIdFor` and `claimClick` must load the same copy of `@bric/rex-page-events/browser` as the extension. A second copy keeps its own IDs and claims, so they are not shared with the click record.
 
 ### When a definition changes
 
@@ -322,10 +355,25 @@ This module reads from the `page_events` section of the backend config.
 | `filter_lists` | string[] | No | `[]` | Names of `rex-lists` lists whose matching URLs are replaced with `CATEGORY:…`. |
 | `allow_lists` | string[] | No | `[]` | Names of `rex-lists` lists whose URLs keep their address. Every other URL is replaced with `CATEGORY:NOT_ON_ALLOWLIST`, so with no lists and no `allow_all` every address is hidden. |
 | `allow_all` | boolean | No | `false` | When `true`, every URL is allowed and `allow_lists` is not consulted. Domain-only and filter lists still apply. |
-| `event_types` | object | No | every type `true` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. |
+| `event_types` | object | No | `click` and every other recorded type `true`; `link_follow` `false` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. `link_follow` is off by default and also switches `link_follow_end`; both are reserved for link following, which nothing records yet. |
 | `domain_only_lists` | string[] | No | `[]` | Matching URLs are replaced with hostname; title becomes `"DOMAIN ONLY"`. |
+| `hidden_link_mode` | string | No | `text_only` | What a click on an allowed page keeps of a link whose own address the lists hide: `show`, `text_only` or `hide`. Other values use the default. See below. |
 | `debug` | boolean | No | `false` | When `true`, `rex-page-url-active` records are additionally dispatched via the REX event bus so PDK and local-download persist them. Raw URLs leave the extension in this mode — use only for development/debugging. |
 | `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a finite number above 0 use the default. |
+
+### hidden_link_mode
+
+Applies to a `click` on a page whose address is kept, when the clicked link's own address is hidden by the lists. A link whose address the lists keep is not affected.
+
+| Value | `link_url` | `link_text` |
+|---|---|---|
+| `text_only` (default) | as the lists redact it | kept |
+| `show` | a link off the allow list keeps its origin (scheme and host), for example `https://www.example.com`; a link on a filter list stays `CATEGORY:<category>`, even when it is also off the allow list; a link on a domain-only list keeps its hostname | kept |
+| `hide` | as the lists redact it | left out |
+
+`hide` hides both the address and the text, with no exception. On a page whose address is hidden, a click keeps no `link_text` whatever the mode.
+
+No mode overrides a filter list. To keep every address and every link text, set `allow_all: true` and configure no `filter_lists` and no `domain_only_lists`.
 
 ### Example
 

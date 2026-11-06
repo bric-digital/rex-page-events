@@ -7,7 +7,8 @@ import rexCorePlugin, {
 import { matchDomainAgainstList } from '@bric/rex-lists'
 import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
-import { type PageEventMessage, type PageEventType, type REXPageEventsConfiguration } from './types.mjs'
+import { type ClickLinkFields, clickLinkFieldsFor, hiddenLinkModeOf, revealsOrigin } from './hidden-link-mode.mjs'
+import { type ClickMessage, type EventTypeSwitch, type PageEventMessage, type PageEventType, type REXPageEventsConfiguration } from './types.mjs'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -20,7 +21,7 @@ const CONFIGURATION_TIMEOUT_MS = 10000
 const SLOW_HANDLER_WARNING_MS = 10000
 const TAB_STATE_STORAGE_KEY = 'rexPageEventsTabState'
 
-const DEFAULT_EVENT_TYPES: Record<PageEventType, boolean> = {
+const DEFAULT_EVENT_TYPES: Record<EventTypeSwitch, boolean> = {
   page_show: true,
   page_hide: true,
   load: true,
@@ -31,6 +32,8 @@ const DEFAULT_EVENT_TYPES: Record<PageEventType, boolean> = {
   tab_blur: true,
   tab_close: true,
   window_close: true,
+  click: true,
+  link_follow: false,
 }
 
 // ---------------------------------------------------------------------------
@@ -172,10 +175,15 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   handleMessage(
-    message: PageEventMessage,
+    message: PageEventMessage | ClickMessage,
     sender: chrome.runtime.MessageSender,
     sendResponse: (response: unknown) => void
   ): boolean {
+    if (message && message.messageType === 'pageClick') {
+      this.enqueue(() => this.recordClick(message, sender))
+      sendResponse({ success: true })
+      return true
+    }
     if (message && message.messageType === 'pageEvent') {
       this.enqueue(() => this.recordPageEvent(message, sender))
       sendResponse({ success: true })
@@ -496,6 +504,61 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     await this.saveTabState()
   }
 
+  private async recordClick(message: ClickMessage, sender: chrome.runtime.MessageSender) {
+    if (!this.isEnabled() || sender.tab?.id === undefined) {
+      return
+    }
+    const tabId = sender.tab.id
+    const timestamp = typeof message.timestamp === 'number' ? message.timestamp : Date.now()
+    const url = message.url ?? sender.tab.url ?? ''
+    const title = message.title ?? sender.tab.title ?? ''
+    const state = this.tabState.get(tabId) ?? this.backfillTabState(tabId, sender.tab, timestamp)
+
+    state.lastTitle = title
+
+    await this.emit('click', state, tabId, url, title, timestamp, await this.clickExtras(message, url))
+
+    await this.saveTabState()
+  }
+
+  private async clickExtras(message: ClickMessage, pageUrl: string): Promise<Record<string, unknown>> {
+    const pageHidden = (await this.redact(pageUrl, message.title)).filtered
+    const linkFields = pageHidden ? await this.hiddenPageLinkFields(message) : await this.allowedPageLinkFields(message)
+
+    return {
+      click_id: message.click_id,
+      click_type: message.click_type,
+      button: message.button,
+      modifier_keys: message.modifier_keys,
+      click_count: message.click_count,
+      on_link: message.on_link,
+      ...linkFields,
+      link_target: message.link_target,
+      claimed: message.claim === undefined ? undefined : true,
+    }
+  }
+
+  private async hiddenPageLinkFields(message: ClickMessage): Promise<Partial<ClickLinkFields>> {
+    if (message.link_url === undefined) {
+      return {}
+    }
+
+    return { link_url: (await this.redact(message.link_url, '')).url }
+  }
+
+  private async allowedPageLinkFields(message: ClickMessage): Promise<Partial<ClickLinkFields>> {
+    if (message.link_url === undefined) {
+      return { link_text: message.link_text }
+    }
+
+    const redaction = await this.redact(message.link_url, '')
+
+    const mode = hiddenLinkModeOf(this.config?.hidden_link_mode)
+    const filterRedaction = revealsOrigin(mode, redaction) ? await this.applyFilterLists(message.link_url) : null
+
+    return clickLinkFieldsFor(mode, redaction, message.link_url, message.link_text, filterRedaction)
+  }
+
   // -------------------------------------------------------------------------
   // Emission + redaction
   // -------------------------------------------------------------------------
@@ -670,8 +733,9 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private isEventTypeOn(eventType: PageEventType): boolean {
-    const configured = this.config?.event_types?.[eventType]
-    return typeof configured === 'boolean' ? configured : DEFAULT_EVENT_TYPES[eventType]
+    const switchName: EventTypeSwitch = eventType === 'link_follow_end' ? 'link_follow' : eventType
+    const configured = this.config?.event_types?.[switchName]
+    return typeof configured === 'boolean' ? configured : DEFAULT_EVENT_TYPES[switchName]
   }
 
   private saveTabState(): Promise<void> {
