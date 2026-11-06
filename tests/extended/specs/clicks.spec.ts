@@ -365,5 +365,48 @@ test.describe('click records', () => {
       expect(clicks.length).toBe(1)
       expect(clicks[0].claimed).toBe(true)
     })
+
+    const BUSY_AFTER_PAGEHIDE_MS = 3000
+    const MESSAGE_DELIVERY_MS = 1000
+
+    function clickThenPageHideWhileTimersAreBlocked(page) {
+      return page.evaluate((busyMs) => {
+        document.querySelector('#blank').click()
+        window.dispatchEvent(new Event('pagehide'))
+
+        const until = Date.now() + busyMs
+
+        while (Date.now() < until) {
+          // hold the page's main thread so no timer can run
+        }
+      }, BUSY_AFTER_PAGEHIDE_MS)
+    }
+
+    test('a click followed by pagehide before the timer can run is sent once, by pagehide', async ({ context, serviceWorker }) => {
+      await startModule(serviceWorker)
+
+      const { page } = await openTestPage(context, BLANK_SPACE)
+      const blocked = clickThenPageHideWhileTimersAreBlocked(page)
+
+      await page.waitForTimeout(MESSAGE_DELIVERY_MS)
+
+      const clicksWhileBlocked = await clicksOf(serviceWorker)
+
+      await blocked
+
+      expect(clicksWhileBlocked.length).toBe(1)
+    })
+
+    test('when pagehide has already sent a click, the later timer does not send it again', async ({ context, serviceWorker }) => {
+      await startModule(serviceWorker)
+
+      const { page } = await openTestPage(context, BLANK_SPACE)
+
+      await clickThenPageHideWhileTimersAreBlocked(page)
+
+      const clicks = await settledClicks(page, serviceWorker)
+
+      expect(clicks.length).toBe(1)
+    })
   })
 })
