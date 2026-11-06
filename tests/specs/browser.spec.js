@@ -22,9 +22,9 @@ test.describe('REX Page Events - Basic Loading', () => {
 
     await expect(page.getByText('The only way to pass a test is to take the test.')).toBeVisible()
 
-    const isREXLoaded = await page.locator('#rex_here').textContent()
-
-    await expect(isREXLoaded).toBeTruthy()
+    // Temporary note: #rex_here starts as "NO", which toBeTruthy() accepted even when the
+    // content script never ran. The content script writes rex-core's load time, a number.
+    await expect(page.locator('#rex_here')).toHaveText(/^\d+$/)
 
     await page.waitForTimeout(startupDelay);
 
