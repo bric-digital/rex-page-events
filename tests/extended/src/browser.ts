@@ -27,6 +27,12 @@ document.addEventListener('click', (event) => {
   }
 }, true)
 
+document.addEventListener('contextmenu', (event) => {
+  if (claimableTarget(event) !== null) {
+    claimClick(clickIdFor(event), { destination_url: CLAIMED_DESTINATION })
+  }
+}, true)
+
 document.addEventListener('click', (event) => {
   const target = claimableTarget(event)
 

@@ -594,7 +594,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     sourceUrl: string,
     clickedAtMs: number
   ) {
-    const startsFollow = message.on_link || message.claim !== undefined
+    const opensPages = message.click_type === 'primary' || message.click_type === 'middle'
+    const startsFollow = opensPages && (message.on_link || message.claim !== undefined)
 
     if (tab.id === undefined || !startsFollow || !this.isEventTypeOn('link_follow') || !(await this.isAllowedPage(sourceUrl))) {
       return

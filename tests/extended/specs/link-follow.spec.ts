@@ -185,6 +185,37 @@ test.describe('link_follow records', () => {
     expect('matched_by' in follows[0]).toBe(false)
   })
 
+  test('a right-click on a claimed link with no navigation gives its click record and no link_follow', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { ...FOLLOWING_ON, link_follow_match_window: SHORT_WINDOW_MS })
+
+    const { page } = await openTestPage(context, CLAIMED_SAME_TAB_LINK)
+    await page.click('#link', { button: 'right' })
+    await page.waitForTimeout(PAST_SHORT_WINDOW_MS)
+
+    const clicks = await clicksOf(serviceWorker)
+
+    expect(clicks.length).toBe(1)
+    expect(clicks[0]).toMatchObject({ click_type: 'right', claimed: true })
+    expect(await followsOf(serviceWorker)).toEqual([])
+  })
+
+  test('a right-click on a link, then a new tab the page opens by script, gives no link_follow', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page } = await openTestPage(context, SAME_TAB_LINK)
+    await page.click('#link', { button: 'right' })
+    await expect.poll(async () => (await clicksOf(serviceWorker)).length).toBe(1)
+    await Promise.all([context.waitForEvent('page'), page.evaluate(() => { window.open('/destination') })])
+    await page.waitForTimeout(SETTLE_MS)
+
+    const [click] = await clicksOf(serviceWorker)
+    const newTabOpen = (await eventsOf(serviceWorker, 'tab_open')).find((event) => event.opener_tab_id === click.tab_id)
+
+    expect(click.click_type).toBe('right')
+    expect(newTabOpen).toBeDefined()
+    expect(await followsOf(serviceWorker)).toEqual([])
+  })
+
   test('a fragment-only or javascript: link records on_link true and no link_follow', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker)
 

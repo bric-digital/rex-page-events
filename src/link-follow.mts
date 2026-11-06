@@ -58,7 +58,7 @@ function isWithinWindow(clickedAtMs: number, atMs: number, windowMs: number): bo
 
 function latestOf(clicks: PendingClick[]): PendingClick | null {
   return clicks.reduce<PendingClick | null>(
-    (latest, candidate) => (latest === null || candidate.clickedAtMs > latest.clickedAtMs ? candidate : latest),
+    (latest, candidate) => (latest === null || candidate.clickedAtMs >= latest.clickedAtMs ? candidate : latest),
     null,
   )
 }

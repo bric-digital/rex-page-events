@@ -58,6 +58,12 @@ test.describe('matchSameTab', () => {
 
     expect((await match(serviceWorker, pending, 'https://b.example/page', 4000))?.clickId).toBe('late')
   })
+
+  test('of two pending clicks with the same time, the one added last wins', async ({ serviceWorker }) => {
+    const pending = [click({ clickId: 'first', clickedAtMs: 2000 }), click({ clickId: 'second', clickedAtMs: 2000 })]
+
+    expect((await match(serviceWorker, pending, 'https://b.example/page', 3000))?.clickId).toBe('second')
+  })
 })
 
 test.describe('isFragmentOnlyChange', () => {
