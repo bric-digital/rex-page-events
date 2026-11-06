@@ -357,9 +357,10 @@ test.describe('click records', () => {
       const { page } = await openTestPage(context, CLAIMABLE_LINK)
       await Promise.all([page.waitForURL('**/destination'), page.click('#link')])
 
+      await expect.poll(async () => (await clicksOf(serviceWorker)).length).toBe(1)
+
       const clicks = await clicksOf(serviceWorker)
 
-      expect(clicks.length).toBe(1)
       expect(clicks[0].claimed).toBe(true)
     })
 
