@@ -368,7 +368,7 @@ Applies to a `click` on a page whose address is kept, when the clicked link's ow
 | Value | `link_url` | `link_text` |
 |---|---|---|
 | `text_only` (default) | as the lists redact it | kept |
-| `show` | a link off the allow list keeps its origin (scheme and host), for example `https://www.example.com`; a link on a filter list stays `CATEGORY:<category>`; a link on a domain-only list keeps its hostname | kept |
+| `show` | a link off the allow list keeps its origin (scheme and host), for example `https://www.example.com`; a link on a filter list stays `CATEGORY:<category>`, even when it is also off the allow list; a link on a domain-only list keeps its hostname | kept |
 | `hide` | as the lists redact it | left out |
 | `strict_hide` | as the lists redact it | left out |
 

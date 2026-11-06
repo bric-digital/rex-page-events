@@ -7,7 +7,7 @@ import rexCorePlugin, {
 import { matchDomainAgainstList } from '@bric/rex-lists'
 import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
-import { type ClickLinkFields, clickLinkFieldsFor, hiddenLinkModeOf } from './hidden-link-mode.mjs'
+import { type ClickLinkFields, clickLinkFieldsFor, hiddenLinkModeOf, revealsOrigin } from './hidden-link-mode.mjs'
 import { type ClickMessage, type EventTypeSwitch, type PageEventMessage, type PageEventType, type REXPageEventsConfiguration } from './types.mjs'
 
 // ---------------------------------------------------------------------------
@@ -553,7 +553,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     const redaction = await this.redact(message.link_url, '')
 
-    return clickLinkFieldsFor(hiddenLinkModeOf(this.config?.hidden_link_mode), redaction, message.link_url, message.link_text)
+    const mode = hiddenLinkModeOf(this.config?.hidden_link_mode)
+    const filterRedaction = revealsOrigin(mode, redaction) ? await this.applyFilterLists(message.link_url) : null
+
+    return clickLinkFieldsFor(mode, redaction, message.link_url, message.link_text, filterRedaction)
   }
 
   // -------------------------------------------------------------------------

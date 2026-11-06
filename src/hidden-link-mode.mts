@@ -29,9 +29,18 @@ function originOf(address: string): string | undefined {
   }
 }
 
-function linkUrlFor(mode: HiddenLinkMode, redaction: LinkRedaction, address: string): string {
-  if (mode === 'show' && redaction.filtered_by_list === NOT_ON_ALLOWLIST) {
-    return originOf(address) ?? redaction.url
+export function revealsOrigin(mode: HiddenLinkMode, redaction: LinkRedaction): boolean {
+  return mode === 'show' && redaction.filtered_by_list === NOT_ON_ALLOWLIST
+}
+
+function linkUrlFor(
+  mode: HiddenLinkMode,
+  redaction: LinkRedaction,
+  address: string,
+  filterRedaction: LinkRedaction | null,
+): string {
+  if (revealsOrigin(mode, redaction)) {
+    return filterRedaction?.url ?? originOf(address) ?? redaction.url
   }
 
   return redaction.url
@@ -46,9 +55,10 @@ export function clickLinkFieldsFor(
   redaction: LinkRedaction,
   address: string,
   text: string | undefined,
+  filterRedaction: LinkRedaction | null,
 ): ClickLinkFields {
   return {
-    link_url: linkUrlFor(mode, redaction, address),
+    link_url: linkUrlFor(mode, redaction, address, filterRedaction),
     link_text: keepsLinkText(mode, redaction) ? text : undefined,
   }
 }

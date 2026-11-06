@@ -427,12 +427,14 @@ test.describe('click records', () => {
 const HIDDEN_LINK_HOSTS = {
   offAllowList: 'https://www.football.test',
   filtered: 'https://filtered.test',
+  filteredOffAllowList: 'https://blocked.test',
   domainOnly: 'https://domain-only.test',
 }
 
 const HIDDEN_LINK_CASES = [
   { name: 'a link off the allow list', link: 'offAllowList', hidden: 'CATEGORY:NOT_ON_ALLOWLIST', shown: 'https://www.football.test' },
   { name: 'a link on a filter list', link: 'filtered', hidden: 'CATEGORY:TEST_FILTERED', shown: 'CATEGORY:TEST_FILTERED' },
+  { name: 'a link on a filter list and off the allow list', link: 'filteredOffAllowList', hidden: 'CATEGORY:NOT_ON_ALLOWLIST', shown: 'CATEGORY:TEST_FILTERED' },
   { name: 'a link on a domain-only list', link: 'domainOnly', hidden: 'domain-only.test', shown: 'domain-only.test' },
 ]
 
@@ -449,6 +451,7 @@ async function startWithLists(serviceWorker, hiddenLinkMode) {
   await addListEntry(serviceWorker, 'click-allow', 'pages.test', 'ALLOWED')
   await addListEntry(serviceWorker, 'click-allow', 'filtered.test', 'ALLOWED')
   await addListEntry(serviceWorker, 'click-filter', 'filtered.test', 'TEST_FILTERED')
+  await addListEntry(serviceWorker, 'click-filter', 'blocked.test', 'TEST_FILTERED')
   await addListEntry(serviceWorker, 'click-domain-only', 'domain-only.test', 'TEST_DOMAIN')
 
   const pageEvents = {
