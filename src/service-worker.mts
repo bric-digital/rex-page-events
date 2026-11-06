@@ -584,6 +584,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return { url, title, filtered: false }
     }
 
+    const domainOnly = await this.applyDomainOnlyLists(url)
+    if (domainOnly !== null) {
+      return domainOnly
+    }
+
     const allowAll = cfg?.allow_all === true
     const allowedBy = allowAll ? undefined : await this.findAllowList(url)
     if (!allowAll && allowedBy === null) {
@@ -598,10 +603,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const filtered = await this.applyFilterLists(url)
     if (filtered !== null) {
       return { ...filtered, ...allowedByField }
-    }
-    const domainOnly = await this.applyDomainOnlyLists(url)
-    if (domainOnly !== null) {
-      return { ...domainOnly, ...allowedByField }
     }
     return { url, title, filtered: false, ...allowedByField }
   }

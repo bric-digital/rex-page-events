@@ -6,7 +6,7 @@ function configWith(pageEvents) {
   return { ...BASE_CONFIG, page_events: { enabled: true, ...pageEvents } }
 }
 
-async function addFilterEntry(serviceWorker, listName, host, category) {
+async function addListEntry(serviceWorker, listName, host, category) {
   await serviceWorker.evaluate(async ({ listName, host, category }) => {
     await self.createListEntry({
       list_name: listName,
@@ -82,7 +82,7 @@ test.describe('Address configuration', () => {
   })
 
   test('a filter list takes precedence over allow_all', async ({ serviceWorker }) => {
-    await addFilterEntry(serviceWorker, 'test-filter', 'example.com', 'TEST_FILTERED')
+    await addListEntry(serviceWorker, 'test-filter', 'example.com', 'TEST_FILTERED')
     await start(serviceWorker, configWith({ allow_all: true, filter_lists: ['test-filter'] }))
 
     const filteredTabId = await openTab(serviceWorker, 'https://example.com/private')
@@ -93,6 +93,34 @@ test.describe('Address configuration', () => {
     const keptTabId = await openTab(serviceWorker, 'https://example.org/public')
     const kept = await tabOpenRecord(serviceWorker, keptTabId)
     expect(kept.url).toContain('example.org/public')
+  })
+
+  test('a domain-only list keeps the hostname of a URL that is not allowed', async ({ serviceWorker }) => {
+    await addListEntry(serviceWorker, 'test-domain-only', 'example.net', 'TEST_DOMAIN')
+    await start(serviceWorker, configWith({ domain_only_lists: ['test-domain-only'] }))
+
+    const tabId = await openTab(serviceWorker, 'https://example.net/page')
+    const record = await tabOpenRecord(serviceWorker, tabId)
+
+    expect(record.url).toBe('example.net')
+    expect(record.title).toBe('DOMAIN ONLY')
+    expect(record.filtered_by_list).toBe('test-domain-only')
+  })
+
+  test('a domain-only list takes precedence over a filter list', async ({ serviceWorker }) => {
+    await addListEntry(serviceWorker, 'test-both-filter', 'example.edu', 'TEST_FILTERED')
+    await addListEntry(serviceWorker, 'test-both-domain-only', 'example.edu', 'TEST_DOMAIN')
+    await start(serviceWorker, configWith({
+      allow_all: true,
+      filter_lists: ['test-both-filter'],
+      domain_only_lists: ['test-both-domain-only'],
+    }))
+
+    const tabId = await openTab(serviceWorker, 'https://example.edu/page')
+    const record = await tabOpenRecord(serviceWorker, tabId)
+
+    expect(record.url).toBe('example.edu')
+    expect(record.filtered_by_list).toBe('test-both-domain-only')
   })
 })
 
