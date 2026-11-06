@@ -8,6 +8,7 @@ import rexCorePlugin, {
 import rexPageEventsPlugin, {
   subscribeUrlActive,
 } from '@bric/rex-page-events/service-worker'
+import { createListEntry } from '@bric/rex-lists'
 
 self['__capturedEvents'] = []
 self['__capturedUrlActive'] = []
@@ -31,5 +32,6 @@ subscribeUrlActive((record) => {
 
 self['rexCorePlugin'] = rexCorePlugin
 self['rexPageEventsPlugin'] = rexPageEventsPlugin
+self['createListEntry'] = createListEntry
 
 rexCorePlugin.setup()

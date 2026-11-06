@@ -11,7 +11,8 @@ REX module that records page, tab, and window lifecycle events and transmits the
 - Per-tab session_id (UUID) minted at tab_open, carried on every subsequent event for that tab
 - Tab state is kept in `chrome.storage.session`, so a tab keeps its session_id and durations when Chrome stops and restarts the idle service worker. Session storage is cleared when the browser restarts and when the extension is updated, reloaded or disabled. A tab already open then starts a new session_id at its next address change or page event, with no `tab_open`, and its `tab_lifetime_ms`, focus and dwell times count from that event. A tab closed or brought to the front before then records nothing.
 - `tab_close` events carry `tab_lifetime_ms` and `focus_duration_ms` (accumulated time the tab was actually focused)
-- URL redaction via allow/filter/domain_only lists (same semantics as `rex-history`) — redacted events still record dwell time
+- URL redaction via allow/filter/domain_only lists — redacted events still record dwell time. Every address is hidden until `allow_lists` or `allow_all` allows it.
+- Each event type can be switched off in configuration; all are on by default
 
 ## Event Schema
 
@@ -210,10 +211,12 @@ When any of the configured lists match a URL, the **outbound event is still disp
 
 Evaluation order for outbound events:
 
-1. `allow_lists` (if configured and URL matches **none**): `url` → `"CATEGORY:NOT_ON_ALLOWLIST"`, `title` omitted.
+1. Allow: unless `allow_all` is `true`, a URL that matches none of the `allow_lists` gets `url` → `"CATEGORY:NOT_ON_ALLOWLIST"`, `title` omitted. With no `allow_lists` and no `allow_all`, this applies to every URL.
 2. `filter_lists` (if URL matches any entry): `url` → `"CATEGORY:<category>"`, `title` omitted, `filtered_by_list: "<listName>"`.
 3. `domain_only_lists` (if URL matches any entry): `url` → hostname only (e.g. `"example.com"`), `title` → `"DOMAIN ONLY"`, `filtered_by_list: "<listName>"`.
 4. Otherwise: raw URL and title pass through.
+
+Filter and domain-only lists apply to every allowed URL, including under `allow_all`, so a filtered URL is never recorded in full.
 
 **Important**: the internal `rex-page-url-active` record delivered to in-process subscribers (see **Linking to rex-history** below) is **never** redacted — it carries the raw URL by design. In default operation that record never leaves the extension. In `debug: true` mode it is additionally dispatched to the event bus, which means it reaches PDK and rex-local-download with the raw URL — do not enable debug in production deployments.
 
@@ -317,7 +320,9 @@ This module reads from the `page_events` section of the backend config.
 |-------|------|----------|---------|-------------|
 | `enabled` | boolean | Yes | — | Enable/disable event recording. If false, no events are dispatched. |
 | `filter_lists` | string[] | No | `[]` | Names of `rex-lists` lists whose matching URLs are replaced with `CATEGORY:…`. |
-| `allow_lists` | string[] | No | `[]` | If set, URLs not on any listed list are replaced with `CATEGORY:NOT_ON_ALLOWLIST`. |
+| `allow_lists` | string[] | No | `[]` | Names of `rex-lists` lists whose URLs keep their address. Every other URL is replaced with `CATEGORY:NOT_ON_ALLOWLIST`, so with no lists and no `allow_all` every address is hidden. |
+| `allow_all` | boolean | No | `false` | When `true`, every URL keeps its address and `allow_lists` is not consulted. Filter and domain-only lists still apply. |
+| `event_types` | object | No | every type `true` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. |
 | `domain_only_lists` | string[] | No | `[]` | Matching URLs are replaced with hostname; title becomes `"DOMAIN ONLY"`. |
 | `debug` | boolean | No | `false` | When `true`, `rex-page-url-active` records are additionally dispatched via the REX event bus so PDK and local-download persist them. Raw URLs leave the extension in this mode — use only for development/debugging. |
 | `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a finite number above 0 use the default. |
@@ -328,13 +333,16 @@ This module reads from the `page_events` section of the backend config.
 {
   "page_events": {
     "enabled": true,
+    "allow_all": true,
     "filter_lists": ["sensitive-sites"],
-    "allow_lists": [],
     "domain_only_lists": ["coarse-domains"],
+    "event_types": { "scroll": false },
     "debug": false
   }
 }
 ```
+
+This records every event type except `scroll`, keeps every address except those on `sensitive-sites` (replaced) and `coarse-domains` (hostname only). Without `allow_all` or `allow_lists`, every address would be hidden.
 
 ## Coupling model
 
