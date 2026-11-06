@@ -16,7 +16,7 @@ REX module that records page, tab, and window lifecycle events and transmits the
 
 ## Event Schema
 
-Every event shares the name `rex-page-event` and is distinguished by `event_type`. There are ten event types in the current implementation.
+Every event shares the name `rex-page-event` and is distinguished by `event_type`. There are eleven event types in the current implementation.
 
 | `event_type` | Source | Notes |
 |---|---|---|
@@ -30,6 +30,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `window_close` | `chrome.windows.onRemoved` | Emitted once per window close |
 | `load` | Content-script `window.load`, or Navigation Timing when the script arrives after load | Once per document, at the time `load` began |
 | `scroll` | Content-script `window.scroll`, after a pause of `scroll_pause_delay` (250 ms by default) | Also at the start, on leaving during a pause, and on return from the bfcache |
+| `click` | Content-script `click`, `contextmenu` and `auxclick`, in the capture phase | One record per button press, on a link or not; carries `click_type`, `modifier_keys` and link metadata |
 
 ### Where each field comes from
 
@@ -224,7 +225,7 @@ URL fragments are matched **exactly**: `https://a/#x` and `https://a/#y` are tre
 
 ## Event definitions
 
-BRIC defines load, unload and scroll as follows. Each definition names its source, and changes when one of the conditions under **When a definition changes** applies.
+BRIC defines load, unload, scroll and click as follows. Each definition names its source, and changes when one of the conditions under **When a definition changes** applies.
 
 ### load
 
@@ -254,6 +255,17 @@ BRIC defines load, unload and scroll as follows. Each definition names its sourc
   - Scrolls made by the page or the browser, such as a jump to an anchor or a restored position, are recorded like the participant's own.
   - Scrolling before configuration arrives is not recorded. The pause is read once configuration arrives; a configuration change applies from the next page load.
 - **Sources:** [CSSOM View, scrolling](https://drafts.csswg.org/cssom-view/#scrolling-events) and [`scrollX`/`scrollY`](https://drafts.csswg.org/cssom-view/#dom-window-scrollx).
+
+### click
+
+- **Definition:** one press of a mouse button on the page, with any button, on a link or not. Each press is recorded once, from one browser event:
+  - a primary click, with or without Shift or Command, is `click`;
+  - a right click, and a Mac Control-click (button 0 with Control held), is `contextmenu`, recorded as `click_type: right`;
+  - `auxclick` is recorded only for the middle button and other buttons, such as a mouse's back and forward buttons, so a right click on Windows, where Chrome also fires `auxclick` after the menu, is still one record.
+- **Fields:** `click_id`, `click_type` (`primary`, `middle`, `right` or `other`), `button` (the browser's button number), `modifier_keys` (any of `shift`, `control`, `alt`, `meta`), `click_count` (1 for a single click, 2 for the second click of a double click), `on_link`, and the usual `url`, `session_id`, `tab_id` and `timestamp`.
+- **Link metadata:** for a click on or inside a link (`a[href]`), `link_url` (the absolute address, redacted like `url`), `link_text` (the visible text with whitespace collapsed, trimmed, at most 200 characters) and `link_target` (the `target` attribute, when it has one). When the page's address is hidden, `link_text` is left out like `title`.
+- **Passive:** the listener never calls `preventDefault` or `stopPropagation` and never delays navigation.
+- **Limits:** a click that a page script stops during the capture phase before it reaches this listener is not recorded. Controls that are not links, such as buttons that script turns into navigation, record `on_link: false`.
 
 ### When a definition changes
 
@@ -322,7 +334,7 @@ This module reads from the `page_events` section of the backend config.
 | `filter_lists` | string[] | No | `[]` | Names of `rex-lists` lists whose matching URLs are replaced with `CATEGORY:…`. |
 | `allow_lists` | string[] | No | `[]` | Names of `rex-lists` lists whose URLs keep their address. Every other URL is replaced with `CATEGORY:NOT_ON_ALLOWLIST`, so with no lists and no `allow_all` every address is hidden. |
 | `allow_all` | boolean | No | `false` | When `true`, every URL is allowed and `allow_lists` is not consulted. Domain-only and filter lists still apply. |
-| `event_types` | object | No | every type `true` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. |
+| `event_types` | object | No | `click` and every other recorded type `true`; `link_follow` `false` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. `link_follow` is off by default and also switches `link_follow_end`. |
 | `domain_only_lists` | string[] | No | `[]` | Matching URLs are replaced with hostname; title becomes `"DOMAIN ONLY"`. |
 | `debug` | boolean | No | `false` | When `true`, `rex-page-url-active` records are additionally dispatched via the REX event bus so PDK and local-download persist them. Raw URLs leave the extension in this mode — use only for development/debugging. |
 | `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a finite number above 0 use the default. |

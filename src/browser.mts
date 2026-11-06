@@ -1,6 +1,7 @@
 import { REXClientModule, registerREXModule } from '@bric/rex-core/browser'
 
-import { type PageEventMessage, type REXPageEventsConfiguration, type ScrollPosition } from './types.mjs'
+import { watchClicks } from './clicks.mjs'
+import { type ClickMessage, type PageEventMessage, type REXPageEventsConfiguration, type ScrollPosition } from './types.mjs'
 
 const DEFAULT_SCROLL_PAUSE_MS = 250
 const CONFIGURATION_TIMEOUT_MS = 10000
@@ -48,6 +49,7 @@ class REXPageEventsModule extends REXClientModule {
     console.log('[rex-page-events] browser setup')
 
     this.watchScroll()
+    watchClicks((message) => this.send(message), document)
 
     window.addEventListener('pageshow', (event: PageTransitionEvent) => {
       this.send({
@@ -150,7 +152,7 @@ class REXPageEventsModule extends REXClientModule {
     })
   }
 
-  private send(message: PageEventMessage): void {
+  private send(message: PageEventMessage | ClickMessage): void {
     chrome.runtime.sendMessage(message).catch((error: unknown) => {
       console.debug('[rex-page-events] sendMessage failed', error)
     })
