@@ -37,12 +37,31 @@ function linkTextOf(link: Element): string {
   return (text ?? '').replace(/\s+/g, ' ').trim().slice(0, LINK_TEXT_LIMIT).trimEnd()
 }
 
+function absoluteAddressOf(href: string, doc: Document): string {
+  try {
+    return new URL(href, doc.baseURI).href
+  } catch {
+    return href
+  }
+}
+
+function newClickId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 function linkFieldsOf(link: Element, doc: Document): Partial<ClickMessage> {
   const href = link.getAttribute('href') ?? ''
   const target = link.getAttribute('target')
   const fields: Partial<ClickMessage> = {
     on_link: true,
-    link_url: new URL(href, doc.baseURI).href,
+    link_url: absoluteAddressOf(href, doc),
     link_text: linkTextOf(link),
   }
 
@@ -58,7 +77,7 @@ function clickMessageFor(event: MouseEvent, doc: Document): ClickMessage {
 
   return {
     messageType: 'pageClick',
-    click_id: crypto.randomUUID(),
+    click_id: newClickId(),
     url: doc.location.href,
     title: doc.title,
     timestamp: Date.now(),

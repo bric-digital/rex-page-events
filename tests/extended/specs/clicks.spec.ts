@@ -17,17 +17,17 @@ async function startModule(serviceWorker, pageEvents = { allow_all: true }) {
   await resetCaptured(serviceWorker)
 }
 
-async function openTestPage(context, body) {
+async function openTestPage(context, body, origin = TEST_ORIGIN) {
   pageCount += 1
 
-  const url = `${TEST_ORIGIN}/click-page-${pageCount}`
+  const url = `${origin}/click-page-${pageCount}`
   const html = `<!doctype html><html><head><title>Click page ${pageCount}</title></head><body>${body}</body></html>`
   const page = await context.newPage()
 
   await page.route('**/*', async (route) => {
     const requestUrl = new URL(route.request().url())
 
-    if (requestUrl.origin !== TEST_ORIGIN) {
+    if (requestUrl.origin !== origin) {
       return route.abort()
     }
 
@@ -109,6 +109,32 @@ test.describe('click records', () => {
 
     expect(clicks.length).toBe(1)
     expect('link_target' in clicks[0]).toBe(false)
+  })
+
+  test('a click on a link with a malformed address still records one click', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page } = await openTestPage(context, '<a id="bad" href="http://">Broken</a>')
+    await page.click('#bad')
+
+    const clicks = await settledClicks(page, serviceWorker)
+
+    expect(clicks.length).toBe(1)
+    expect(clicks[0].on_link).toBe(true)
+    expect(clicks[0].link_text).toBe('Broken')
+  })
+
+  test('a click on a page served over http records a click_id', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page } = await openTestPage(context, LINK, 'http://pages.test')
+    await page.click('#link')
+
+    const clicks = await settledClicks(page, serviceWorker)
+
+    expect(clicks.length).toBe(1)
+    expect(typeof clicks[0].click_id).toBe('string')
+    expect(clicks[0].click_id).toMatch(/^[0-9a-f-]{36}$/)
   })
 
   test('a middle click records click_type middle once', async ({ context, serviceWorker }) => {
