@@ -444,7 +444,6 @@ const HIDDEN_LINK_MODES = [
   { mode: 'bogus', keepsAddress: false, keepsText: true },
   { mode: 'show', keepsAddress: true, keepsText: true },
   { mode: 'hide', keepsAddress: false, keepsText: false },
-  { mode: 'strict_hide', keepsAddress: false, keepsText: true },
 ]
 
 async function startWithLists(serviceWorker, hiddenLinkMode) {
