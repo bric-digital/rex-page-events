@@ -62,8 +62,19 @@ function latestOf(clicks: PendingClick[]): PendingClick | null {
   )
 }
 
-function destinationOf(click: PendingClick): string | undefined {
-  return click.claimDestinationUrl ?? click.linkUrl
+function candidateAddressesOf(click: PendingClick): string[] {
+  return [click.linkUrl, click.claimDestinationUrl].filter((address): address is string => address !== undefined)
+}
+
+function hasAddress(click: PendingClick, address: string | undefined): boolean {
+  return address !== undefined && candidateAddressesOf(click).includes(address)
+}
+
+function preferredByAddress(clicks: PendingClick[], address: string | undefined): PendingClick | null {
+  const byLinkUrl = clicks.filter((click) => address !== undefined && click.linkUrl === address)
+  const byAnyAddress = clicks.filter((click) => hasAddress(click, address))
+
+  return latestOf(byLinkUrl.length > 0 ? byLinkUrl : byAnyAddress)
 }
 
 function newTabAddress(tab: NewTabDescription): string | undefined {
@@ -94,9 +105,7 @@ function matchByOpener(
   const fromOpener = pending.filter(
     (click) => click.tabId === tab.openerTabId && isWithinWindow(click.clickedAtMs, atMs, windowMs),
   )
-  const address = newTabAddress(tab)
-  const sameAddress = fromOpener.filter((click) => address !== undefined && destinationOf(click) === address)
-  const click = latestOf(sameAddress.length > 0 ? sameAddress : fromOpener)
+  const click = preferredByAddress(fromOpener, newTabAddress(tab)) ?? latestOf(fromOpener)
 
   if (click === null) {
     return null
@@ -118,15 +127,15 @@ function matchByAddressAndTime(
     return null
   }
 
-  const click = latestOf(
+  const click = preferredByAddress(
     pending.filter(
       (candidate) =>
         candidate.shiftHeld &&
         candidate.windowId !== tab.windowId &&
-        destinationOf(candidate) === address &&
         isWithinWindow(candidate.clickedAtMs, atMs, windowMs) &&
         isWithinWindow(candidate.clickedAtMs, windowCreatedAtMs, windowMs),
     ),
+    address,
   )
 
   return click === null ? null : { click, openMode: 'new_window', matchedBy: 'address_and_time' }

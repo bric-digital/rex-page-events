@@ -111,6 +111,41 @@ test.describe('matchNewTab', () => {
     expect(matched).toEqual(['three', 'one', 'two'])
   })
 
+  test('a burst of claimed redirect links matches each tab to its own click by pendingUrl', async ({ serviceWorker }) => {
+    const redirect = (n, clickedAtMs) =>
+      click({
+        clickId: `r${n}`,
+        clickedAtMs,
+        linkUrl: `https://g.example/goto?url=${n}`,
+        claimDestinationUrl: `https://b.example/${n}`,
+      })
+    const pending = [redirect(1, 1000), redirect(2, 1010), redirect(3, 1020)]
+    const matched = []
+
+    for (const n of ['3', '1', '2']) {
+      const result = await matchTab(serviceWorker, pending, { openerTabId: 1, windowId: 10, pendingUrl: `https://g.example/goto?url=${n}` })
+
+      matched.push(result?.click.clickId)
+    }
+
+    expect(matched).toEqual(['r3', 'r1', 'r2'])
+  })
+
+  test('a tab addressed at the claimed destination matches its click', async ({ serviceWorker }) => {
+    const redirect = (n, clickedAtMs) =>
+      click({
+        clickId: `r${n}`,
+        clickedAtMs,
+        linkUrl: `https://g.example/goto?url=${n}`,
+        claimDestinationUrl: `https://b.example/${n}`,
+      })
+    const pending = [redirect(1, 1000), redirect(2, 1010)]
+
+    const result = await matchTab(serviceWorker, pending, { openerTabId: 1, windowId: 10, pendingUrl: 'https://b.example/1' })
+
+    expect(result?.click.clickId).toBe('r1')
+  })
+
   test('no pending click from the opener tab does not match', async ({ serviceWorker }) => {
     expect(await matchTab(serviceWorker, [click()], { openerTabId: 2, windowId: 10 })).toBeNull()
   })
@@ -127,6 +162,28 @@ test.describe('matchNewTab', () => {
       const result = await matchTab(serviceWorker, [shiftClick], tab, 2000, 1500)
 
       expect(result).toEqual({ click: shiftClick, openMode: 'new_window', matchedBy: 'address_and_time' })
+    })
+
+    test('a claimed redirect link Shift-clicked into a new window matches by its link address', async ({ serviceWorker }) => {
+      const redirect = click({
+        shiftHeld: true,
+        linkUrl: 'https://g.example/goto?url=1',
+        claimDestinationUrl: 'https://b.example/1',
+      })
+      const result = await matchTab(serviceWorker, [redirect], { windowId: 11, pendingUrl: 'https://g.example/goto?url=1' }, 2000, 1500)
+
+      expect(result).toEqual({ click: redirect, openMode: 'new_window', matchedBy: 'address_and_time' })
+    })
+
+    test('a claimed redirect link matches by its claimed destination too', async ({ serviceWorker }) => {
+      const redirect = click({
+        shiftHeld: true,
+        linkUrl: 'https://g.example/goto?url=1',
+        claimDestinationUrl: 'https://b.example/1',
+      })
+      const result = await matchTab(serviceWorker, [redirect], { windowId: 11, pendingUrl: 'https://b.example/1' }, 2000, 1500)
+
+      expect(result?.matchedBy).toBe('address_and_time')
     })
 
     test('matches by the tab address when there is no pending address', async ({ serviceWorker }) => {
