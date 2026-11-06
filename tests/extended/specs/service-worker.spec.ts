@@ -27,16 +27,16 @@ test.describe('REX Page Events', () => {
     expect(identifier).toEqual('i-am-rex')
   })
 
-  test('url-active seam is installed on globalThis', async ({ serviceWorker }) => {
+  test('the url-active subscription is installed on globalThis', async ({ serviceWorker }) => {
     await loadConfig(serviceWorker, BASE_CONFIG)
     await waitForPageEventsConfig(serviceWorker)
 
-    const hasSeam = await serviceWorker.evaluate(() => {
-      const seam = globalThis.__rexPageEventsUrlActive
-      return seam !== undefined && typeof seam.subscribe === 'function'
+    const hasSubscription = await serviceWorker.evaluate(() => {
+      const urlActive = globalThis.__rexPageEventsUrlActive
+      return urlActive !== undefined && typeof urlActive.subscribe === 'function'
     })
 
-    expect(hasSeam).toBe(true)
+    expect(hasSubscription).toBe(true)
   })
 
   test('creating a tab emits tab_open and delivers url-active', async ({ serviceWorker }) => {
