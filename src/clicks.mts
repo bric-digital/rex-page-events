@@ -1,8 +1,11 @@
-import { type ClickMessage, type ClickType, type ModifierKey } from './types.mjs'
+import { type ClickClaim, type ClickMessage, type ClickType, type ModifierKey } from './types.mjs'
 
 const LINK_TEXT_LIMIT = 200
 const PRIMARY_BUTTON = 0
 const RIGHT_BUTTON = 2
+
+const clickIds = new WeakMap<Event, string>()
+const pendingClaims = new Map<string, ClickClaim>()
 
 const MODIFIER_FLAGS: [ModifierKey, 'shiftKey' | 'ctrlKey' | 'altKey' | 'metaKey'][] = [
   ['shift', 'shiftKey'],
@@ -77,7 +80,7 @@ function clickMessageFor(event: MouseEvent, doc: Document): ClickMessage {
 
   return {
     messageType: 'pageClick',
-    click_id: newClickId(),
+    click_id: clickIdFor(event),
     url: doc.location.href,
     title: doc.title,
     timestamp: Date.now(),
@@ -90,6 +93,49 @@ function clickMessageFor(event: MouseEvent, doc: Document): ClickMessage {
   }
 }
 
+export function clickIdFor(event: Event): string {
+  const known = clickIds.get(event)
+
+  if (known !== undefined) {
+    return known
+  }
+
+  const clickId = newClickId()
+
+  clickIds.set(event, clickId)
+
+  return clickId
+}
+
+export function claimClick(clickId: string, claim: ClickClaim = {}): void {
+  pendingClaims.set(clickId, { ...pendingClaims.get(clickId), ...claim })
+}
+
+function withClaim(message: ClickMessage): ClickMessage {
+  const claim = pendingClaims.get(message.click_id)
+
+  pendingClaims.delete(message.click_id)
+
+  return claim === undefined ? message : { ...message, claim }
+}
+
+function sendOnceDeferred(send: (message: ClickMessage) => void, message: ClickMessage, view: Window): void {
+  let sent = false
+
+  const sendNow = () => {
+    if (sent) {
+      return
+    }
+
+    sent = true
+    view.removeEventListener('pagehide', sendNow)
+    send(withClaim(message))
+  }
+
+  setTimeout(sendNow, 0)
+  view.addEventListener('pagehide', sendNow)
+}
+
 export function watchClicks(send: (message: ClickMessage) => void, doc: Document): void {
   const view = doc.defaultView
 
@@ -98,9 +144,8 @@ export function watchClicks(send: (message: ClickMessage) => void, doc: Document
   }
 
   const record = (event: MouseEvent) => {
-    send(clickMessageFor(event, doc))
+    sendOnceDeferred(send, clickMessageFor(event, doc), view)
   }
-
   view.addEventListener('click', record, true)
   view.addEventListener('contextmenu', record, true)
   view.addEventListener('auxclick', (event: MouseEvent) => {

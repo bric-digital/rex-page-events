@@ -534,6 +534,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       link_url: linkUrl,
       link_text: pageHidden ? undefined : message.link_text,
       link_target: message.link_target,
+      claim: message.claim,
     }
   }
 

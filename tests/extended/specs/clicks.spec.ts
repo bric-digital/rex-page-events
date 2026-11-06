@@ -278,4 +278,87 @@ test.describe('click records', () => {
 
     expect((await settledClicks(page, serviceWorker)).length).toBe(1)
   })
+
+  test.describe('click IDs and claims', () => {
+    const CLAIMED_DESTINATION = 'https://claimed.test/destination'
+    const CLAIMABLE_LINK = '<div class="claimable"><a id="link" href="/destination">Result title</a></div>'
+
+    test('two callers of clickIdFor get the same ID for one click, and the click record carries it', async ({ context, serviceWorker }) => {
+      await startModule(serviceWorker)
+
+      const { page } = await openTestPage(context, `<div class="claimable"><a id="link" href="/destination" target="_blank">Result title</a></div>`)
+      await page.click('#link')
+
+      const clicks = await settledClicks(page, serviceWorker)
+      const seenIds = (await page.getAttribute('#link', 'data-click-ids')).split(' ')
+
+      expect(clicks.length).toBe(1)
+      expect(seenIds.length).toBe(2)
+      expect(seenIds[0]).toBe(seenIds[1])
+      expect(clicks[0].click_id).toBe(seenIds[0])
+    })
+
+    test('two quick clicks get different IDs', async ({ context, serviceWorker }) => {
+      await startModule(serviceWorker)
+
+      const { page } = await openTestPage(context, BLANK_SPACE)
+      await page.click('#blank', { clickCount: 2, delay: 10 })
+
+      const clicks = await settledClicks(page, serviceWorker)
+
+      expect(clicks.length).toBe(2)
+      expect(clicks[0].click_id).not.toBe(clicks[1].click_id)
+    })
+
+    test('a claim made in a document capture listener rides on the click record', async ({ context, serviceWorker }) => {
+      await startModule(serviceWorker)
+
+      const { page } = await openTestPage(context, CLAIMABLE_LINK.replace('/destination"', '/destination" target="_blank"'))
+      await page.click('#link')
+
+      const clicks = await settledClicks(page, serviceWorker)
+
+      expect(clicks.length).toBe(1)
+      expect(clicks[0].claim).toEqual({ destination_url: CLAIMED_DESTINATION })
+    })
+
+    test('a click outside a claimable area carries no claim', async ({ context, serviceWorker }) => {
+      await startModule(serviceWorker)
+
+      const { page } = await openTestPage(context, LINK)
+      await page.click('#link')
+
+      const clicks = await settledClicks(page, serviceWorker)
+
+      expect(clicks.length).toBe(1)
+      expect('claim' in clicks[0]).toBe(false)
+    })
+
+    test('a claim made on a link that navigates in the same tab is still recorded', async ({ context, serviceWorker }) => {
+      await startModule(serviceWorker)
+
+      const { page } = await openTestPage(context, CLAIMABLE_LINK)
+      await Promise.all([page.waitForURL('**/destination'), page.click('#link')])
+
+      const clicks = await clicksOf(serviceWorker)
+
+      expect(clicks.length).toBe(1)
+      expect(clicks[0].claim).toEqual({ destination_url: CLAIMED_DESTINATION })
+    })
+
+    test('a page that stops propagation in the bubble phase still records the click once, with its claim', async ({ context, serviceWorker }) => {
+      await startModule(serviceWorker)
+
+      const { page } = await openTestPage(context, CLAIMABLE_LINK.replace('/destination"', '/destination" target="_blank"'))
+      await page.evaluate(() => {
+        document.querySelector('#link').addEventListener('click', (event) => event.stopPropagation())
+      })
+      await page.click('#link')
+
+      const clicks = await settledClicks(page, serviceWorker)
+
+      expect(clicks.length).toBe(1)
+      expect(clicks[0].claim).toEqual({ destination_url: CLAIMED_DESTINATION })
+    })
+  })
 })

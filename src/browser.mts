@@ -3,6 +3,8 @@ import { REXClientModule, registerREXModule } from '@bric/rex-core/browser'
 import { watchClicks } from './clicks.mjs'
 import { type ClickMessage, type PageEventMessage, type REXPageEventsConfiguration, type ScrollPosition } from './types.mjs'
 
+export { claimClick, clickIdFor } from './clicks.mjs'
+
 const DEFAULT_SCROLL_PAUSE_MS = 250
 const CONFIGURATION_TIMEOUT_MS = 10000
 

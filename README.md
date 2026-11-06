@@ -12,7 +12,7 @@ REX module that records page, tab, and window lifecycle events and transmits the
 - Tab state is kept in `chrome.storage.session`, so a tab keeps its session_id and durations when Chrome stops and restarts the idle service worker. Session storage is cleared when the browser restarts and when the extension is updated, reloaded or disabled. A tab already open then starts a new session_id at its next address change or page event, with no `tab_open`, and its `tab_lifetime_ms`, focus and dwell times count from that event. A tab closed or brought to the front before then records nothing.
 - `tab_close` events carry `tab_lifetime_ms` and `focus_duration_ms` (accumulated time the tab was actually focused)
 - URL redaction via allow/filter/domain_only lists — redacted events still record dwell time. Every address is hidden until `allow_lists` or `allow_all` allows it.
-- Each event type can be switched off in configuration; all are on by default
+- Each event type can be switched off in configuration; all are on by default except `link_follow`, which is off by default
 
 ## Event Schema
 
@@ -37,7 +37,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | Field | Source |
 |---|---|
 | `name` | Hardcoded: `"rex-page-event"` for every event |
-| `event_type` | One of the ten types in the table above |
+| `event_type` | One of the eleven types in the table above |
 | `session_id` | `crypto.randomUUID()` — minted once on `tab_open` (or on first observed event for a tab whose `onCreated` was missed), then attached to every subsequent event for that tab |
 | `tab_id` | `chrome.tabs.*` listeners (the active listener's `tabId` argument), or `sender.tab.id` for content-script-originated events |
 | `window_id` | Same listeners / `sender.tab.windowId` |
@@ -266,6 +266,22 @@ BRIC defines load, unload, scroll and click as follows. Each definition names it
 - **Link metadata:** for a click on or inside a link (`a[href]`), `link_url` (the absolute address, redacted like `url`), `link_text` (the visible text with whitespace collapsed, trimmed, at most 200 characters) and `link_target` (the `target` attribute, when it has one). When the page's address is hidden, `link_text` is left out like `title`.
 - **Passive:** the listener never calls `preventDefault` or `stopPropagation` and never delays navigation.
 - **Limits:** a click that a page script stops during the capture phase before it reaches this listener is not recorded. Controls that are not links, such as buttons that script turns into navigation, record `on_link: false`.
+
+### Click IDs and claims for other modules
+
+Other modules in the same page part can tie their own work to a click, and say where it leads. Both functions are named exports of `@bric/rex-page-events/browser`:
+
+```ts
+import { claimClick, clickIdFor } from '@bric/rex-page-events/browser'
+
+clickIdFor(event: Event): string
+claimClick(clickId: string, claim?: ClickClaim): void
+```
+
+- `clickIdFor(event)` returns the same ID for one DOM event, whoever calls it and in whatever order. It is the `click_id` of that click's record.
+- `claimClick(clickId, claim)` attaches a `ClickClaim` (`destination_url`, optional) to the click. A second claim for the same ID is merged into the first.
+- Each click is sent once, at the first of a `setTimeout(0)` scheduled from the capture listener and `pagehide`. A claim made before then, for example from a `document` capture listener, is on the stored `click` record as `claim`. A claim made after the click is sent is not recorded.
+- Sending does not depend on any bubble-phase listener, so a page that stops propagation still has its click recorded once.
 
 ### When a definition changes
 
