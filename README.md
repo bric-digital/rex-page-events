@@ -357,7 +357,7 @@ This module reads from the `page_events` section of the backend config.
 | `allow_all` | boolean | No | `false` | When `true`, every URL is allowed and `allow_lists` is not consulted. Domain-only and filter lists still apply. |
 | `event_types` | object | No | `click` and every other recorded type `true`; `link_follow` `false` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. `link_follow` is off by default and also switches `link_follow_end`; both are reserved for link following, which nothing records yet. |
 | `domain_only_lists` | string[] | No | `[]` | Matching URLs are replaced with hostname; title becomes `"DOMAIN ONLY"`. |
-| `hidden_link_mode` | string | No | `text_only` | What a click on an allowed page keeps of a link whose own address the lists hide: `show`, `text_only`, `hide` or `strict_hide`. Other values use the default. See below. |
+| `hidden_link_mode` | string | No | `text_only` | What a click on an allowed page keeps of a link whose own address the lists hide: `show`, `text_only` or `hide`. Other values use the default. See below. |
 | `debug` | boolean | No | `false` | When `true`, `rex-page-url-active` records are additionally dispatched via the REX event bus so PDK and local-download persist them. Raw URLs leave the extension in this mode — use only for development/debugging. |
 | `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a finite number above 0 use the default. |
 
@@ -370,9 +370,8 @@ Applies to a `click` on a page whose address is kept, when the clicked link's ow
 | `text_only` (default) | as the lists redact it | kept |
 | `show` | a link off the allow list keeps its origin (scheme and host), for example `https://www.example.com`; a link on a filter list stays `CATEGORY:<category>`, even when it is also off the allow list; a link on a domain-only list keeps its hostname | kept |
 | `hide` | as the lists redact it | left out |
-| `strict_hide` | as the lists redact it | left out |
 
-`hide` and `strict_hide` currently behave the same. On a page whose address is hidden, a click keeps no `link_text` whatever the mode.
+`hide` hides both the address and the text, with no exception. On a page whose address is hidden, a click keeps no `link_text` whatever the mode.
 
 No mode overrides a filter list. To keep every address and every link text, set `allow_all: true` and configure no `filter_lists` and no `domain_only_lists`.
 

@@ -16,7 +16,7 @@ export type EventTypeSwitch = Exclude<PageEventType, 'link_follow_end'>
 
 export type ClickType = 'primary' | 'middle' | 'right' | 'other'
 
-export type HiddenLinkMode = 'show' | 'text_only' | 'hide' | 'strict_hide'
+export type HiddenLinkMode = 'show' | 'text_only' | 'hide'
 
 export type ModifierKey = 'shift' | 'control' | 'alt' | 'meta'
 

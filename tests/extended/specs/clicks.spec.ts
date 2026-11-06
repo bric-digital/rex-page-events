@@ -444,7 +444,7 @@ const HIDDEN_LINK_MODES = [
   { mode: 'bogus', keepsAddress: false, keepsText: true },
   { mode: 'show', keepsAddress: true, keepsText: true },
   { mode: 'hide', keepsAddress: false, keepsText: false },
-  { mode: 'strict_hide', keepsAddress: false, keepsText: false },
+  { mode: 'strict_hide', keepsAddress: false, keepsText: true },
 ]
 
 async function startWithLists(serviceWorker, hiddenLinkMode) {
@@ -489,7 +489,7 @@ test.describe('hidden_link_mode', () => {
   }
 
   test('a link whose address the lists keep is unaffected by the mode', async ({ context, serviceWorker }) => {
-    await startWithLists(serviceWorker, 'strict_hide')
+    await startWithLists(serviceWorker, 'hide')
 
     const { page } = await openTestPage(context, '<a id="link" href="/destination" target="_blank">Kept text</a>')
     await page.click('#link')

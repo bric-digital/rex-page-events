@@ -4,7 +4,7 @@ export const DEFAULT_HIDDEN_LINK_MODE: HiddenLinkMode = 'text_only'
 
 const NOT_ON_ALLOWLIST = 'NOT_ON_ALLOWLIST'
 
-const HIDDEN_LINK_MODES: readonly HiddenLinkMode[] = ['show', 'text_only', 'hide', 'strict_hide']
+const HIDDEN_LINK_MODES: readonly HiddenLinkMode[] = ['show', 'text_only', 'hide']
 
 export interface LinkRedaction {
   url: string
