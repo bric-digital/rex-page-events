@@ -21,7 +21,7 @@ export function hiddenLinkModeOf(configured: unknown): HiddenLinkMode {
   return HIDDEN_LINK_MODES.find((mode) => mode === configured) ?? DEFAULT_HIDDEN_LINK_MODE
 }
 
-function originOf(address: string): string | undefined {
+export function originOf(address: string): string | undefined {
   try {
     return new URL(address).origin
   } catch {
