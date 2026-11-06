@@ -280,7 +280,7 @@ claimClick(clickId: string, claim?: ClickClaim): void
 
 - `clickIdFor(event)` returns the same ID for one DOM event, whoever calls it and in whatever order. It is the `click_id` of that click's record.
 - `claimClick(clickId, claim)` attaches a `ClickClaim` (`destination_url`, optional) to the click. A second claim for the same ID is merged into the first.
-- Each click is sent once, at the first of a `setTimeout(0)` scheduled from the capture listener and `pagehide`. A claim made before then, for example from a `document` capture listener, is on the stored `click` record as `claim`. A claim made after the click is sent is not recorded.
+- Each click is sent once, at the first of a `setTimeout(0)` scheduled from the capture listener and `pagehide`. A claim made before then, for example from a `document` capture listener, is recorded on the stored `click` as `claimed: true`; the claim itself, including any `destination_url`, is never stored. A claim made after the click is sent is not recorded.
 - Sending does not depend on any bubble-phase listener, so a page that stops propagation still has its click recorded once.
 
 ### When a definition changes

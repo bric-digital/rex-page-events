@@ -319,7 +319,12 @@ test.describe('click records', () => {
       const clicks = await settledClicks(page, serviceWorker)
 
       expect(clicks.length).toBe(1)
-      expect(clicks[0].claim).toEqual({ destination_url: CLAIMED_DESTINATION })
+      expect(clicks[0].claimed).toBe(true)
+
+      const everything = await serviceWorker.evaluate(() => JSON.stringify(self.__capturedEvents))
+
+      expect(everything).not.toContain(CLAIMED_DESTINATION)
+      expect('claim' in clicks[0]).toBe(false)
     })
 
     test('a click outside a claimable area carries no claim', async ({ context, serviceWorker }) => {
@@ -331,7 +336,7 @@ test.describe('click records', () => {
       const clicks = await settledClicks(page, serviceWorker)
 
       expect(clicks.length).toBe(1)
-      expect('claim' in clicks[0]).toBe(false)
+      expect('claimed' in clicks[0]).toBe(false)
     })
 
     test('a claim made on a link that navigates in the same tab is still recorded', async ({ context, serviceWorker }) => {
@@ -343,7 +348,7 @@ test.describe('click records', () => {
       const clicks = await clicksOf(serviceWorker)
 
       expect(clicks.length).toBe(1)
-      expect(clicks[0].claim).toEqual({ destination_url: CLAIMED_DESTINATION })
+      expect(clicks[0].claimed).toBe(true)
     })
 
     test('a page that stops propagation in the bubble phase still records the click once, with its claim', async ({ context, serviceWorker }) => {
@@ -358,7 +363,7 @@ test.describe('click records', () => {
       const clicks = await settledClicks(page, serviceWorker)
 
       expect(clicks.length).toBe(1)
-      expect(clicks[0].claim).toEqual({ destination_url: CLAIMED_DESTINATION })
+      expect(clicks[0].claimed).toBe(true)
     })
   })
 })
