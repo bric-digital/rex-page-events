@@ -273,7 +273,7 @@ Cases where `opener_tab_id` will be **absent**: tabs opened from the address bar
 
 ## Linking to rex-history
 
-`rex-page-events` records focus dwell on a per-tab basis, but a tab can visit many URLs over its lifetime. To give analysts a way to attach focus time to a specific `rex-history-visit` record, this module installs a tiny loose-coupling seam on `globalThis`:
+`rex-page-events` records focus dwell on a per-tab basis, but a tab can visit many URLs over its lifetime. To give analysts a way to attach focus time to a specific `rex-history-visit` record, this module offers a subscription on `globalThis`:
 
 ```ts
 interface RexPageUrlActiveEvent {
@@ -285,20 +285,20 @@ interface RexPageUrlActiveEvent {
   url_shown_at: number  // same timestamp this module reports on every event
 }
 
-interface UrlActiveSeam {
+interface UrlActiveSubscription {
   subscribe(listener: (event: RexPageUrlActiveEvent) => void): () => void
 }
 
-const seam: UrlActiveSeam | undefined =
-  (globalThis as unknown as { __rexPageEventsUrlActive?: UrlActiveSeam }).__rexPageEventsUrlActive
+const urlActive: UrlActiveSubscription | undefined =
+  (globalThis as unknown as { __rexPageEventsUrlActive?: UrlActiveSubscription }).__rexPageEventsUrlActive
 ```
 
-Any sibling service-worker module (for example `rex-history`) that wants to join its own records against page-events records can probe for the seam at startup. If it's present, subscribe. If not, proceed without linkage:
+Any sibling service-worker module (for example `rex-history`) that wants to join its own records against page-events records can look for the subscription at startup. If it's present, subscribe. If not, proceed without linkage:
 
 ```ts
-const seam = (globalThis as unknown as { __rexPageEventsUrlActive?: UrlActiveSeam }).__rexPageEventsUrlActive
-if (seam?.subscribe) {
-  const unsubscribe = seam.subscribe((record) => {
+const urlActive = (globalThis as unknown as { __rexPageEventsUrlActive?: UrlActiveSubscription }).__rexPageEventsUrlActive
+if (urlActive?.subscribe) {
+  const unsubscribe = urlActive.subscribe((record) => {
     // buffer or process `record`
   })
   // call unsubscribe() to stop listening
@@ -344,7 +344,7 @@ This module and `rex-history` use **two different kinds of coupling on purpose.*
 
 **Data — tightly coupled.** Once both modules are present, every `rex-history-visit` record that matches a buffered `rex-page-url-active` gets `tab_id`, `window_id`, `session_id`, and `page_events_url_shown_at` stapled onto it. A visit's `session_id` means exactly the same thing as the page-event's `session_id` for the same tab lifetime — analysts can treat the two streams as one correlated dataset, joining on `session_id` for exact-within-tab analysis or on `(url, page_events_url_shown_at ≈ visit_time)` for visit-level analysis.
 
-Put simply: loose at the code seam so each module is independently useful, tight at the data seam so the output is analyzable as a single story.
+Put simply: loosely coupled in code, so each module is useful on its own, and tightly coupled in data, so the output can be analyzed as a single story.
 
 ## Installation
 
@@ -394,7 +394,7 @@ Run one set with `npx playwright test --project=chromium` or `--project=extended
 
 The `extended` specs:
 
-- `service-worker.spec.ts`: verifies tab_open, tab_url_change (describing the outgoing URL), tab_close lifetime stats, the url-active seam, and that `enabled: false` suppresses events.
+- `service-worker.spec.ts`: verifies tab_open, tab_url_change (describing the outgoing URL), tab_close lifetime stats, the url-active subscription, and that `enabled: false` suppresses events.
 - `window-focus.spec.ts`: verifies that focusing another window blurs the tab in the window that lost focus and focuses the active tab of the one that gained it, and that a window regaining focus after the browser lost it restarts its active tab's focus. Playwright's Chromium fires no `windows.onFocusChanged`, so these tests pass the module the event Chrome sends; a real window switch is checked by hand.
 - `browser.spec.ts`: loads the browser part through rex-core's own injection and verifies page_hide's `persisted` flag on leaving a page the browser caches and one it does not, `load` when the script arrives before and after load, `scroll` at the start, after a pause, on leaving and on return from the bfcache, and the order of `scroll`, `page_hide` and `tab_close` when a tab is closed. Tests that need the bfcache set the fixture option `backForwardCache`, because Playwright otherwise starts Chromium with it disabled. It also verifies that moving focus into a frame inside a page and back records no focus change.
 - `service-worker-restart.spec.ts`: verifies that tab state survives Chrome stopping and restarting the idle service worker.
