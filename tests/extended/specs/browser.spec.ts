@@ -220,7 +220,7 @@ test.describe('REX Page Events in pages', () => {
   })
 
   test('a configured scroll pause delays the record until scrolling has paused that long', async ({ context, serviceWorker }) => {
-    await startModule(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, scroll_pause_delay: 1000 } })
+    await startModule(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, allow_all: true, scroll_pause_delay: 1000 } })
 
     const { page, url } = await openTestPage(context, TALL_PAGE)
 
@@ -245,7 +245,7 @@ test.describe('REX Page Events in pages', () => {
   })
 
   test('a scroll pause that is not a number uses 250 ms', async ({ context, serviceWorker }) => {
-    await startModule(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, scroll_pause_delay: '1000' } })
+    await startModule(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, allow_all: true, scroll_pause_delay: '1000' } })
 
     const { page, url } = await openTestPage(context, TALL_PAGE)
 

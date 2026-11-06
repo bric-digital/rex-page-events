@@ -25,7 +25,9 @@ export interface REXPageEventsConfiguration {
   enabled: boolean
   filter_lists?: string[]
   allow_lists?: string[]
+  allow_all?: boolean
   domain_only_lists?: string[]
+  event_types?: Partial<Record<PageEventType, boolean>>
   debug?: boolean
   scroll_pause_delay?: number
 }

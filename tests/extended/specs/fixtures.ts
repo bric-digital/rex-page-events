@@ -54,6 +54,7 @@ export const BASE_CONFIG = {
   identifier: 'rex-page-events-test',
   page_events: {
     enabled: true,
+    allow_all: true,
   },
   ui: [{
     title: 'Test',

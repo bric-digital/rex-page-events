@@ -20,6 +20,19 @@ const CONFIGURATION_TIMEOUT_MS = 10000
 const SLOW_HANDLER_WARNING_MS = 10000
 const TAB_STATE_STORAGE_KEY = 'rexPageEventsTabState'
 
+const DEFAULT_EVENT_TYPES: Record<PageEventType, boolean> = {
+  page_show: true,
+  page_hide: true,
+  load: true,
+  scroll: true,
+  tab_open: true,
+  tab_url_change: true,
+  tab_focus: true,
+  tab_blur: true,
+  tab_close: true,
+  window_close: true,
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -497,6 +510,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     extras: Record<string, unknown> = {},
     urlShownAtOverrideMs?: number
   ) {
+    if (!this.isEventTypeOn(eventType)) {
+      return
+    }
+
     const redaction = await this.redact(url, title)
 
     const payload: Record<string, unknown> = {
@@ -567,50 +584,40 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return { url, title, filtered: false }
     }
 
-    // 1. Allow-lists
-    const allowLists = cfg?.allow_lists ?? []
-    if (allowLists.length > 0) {
-      let matched: { list: string } | null = null
-      for (const listName of allowLists) {
-        try {
-          const entry = await matchDomainAgainstList(url, listName)
-          if (entry) {
-            matched = { list: listName }
-            break
-          }
-        } catch (err) {
-          console.warn(`${LOG_PREFIX} allow list error on ${listName}`, err)
-        }
-      }
-      if (matched === null) {
-        return {
-          url: 'CATEGORY:NOT_ON_ALLOWLIST',
-          filtered: true,
-          filtered_by_list: 'NOT_ON_ALLOWLIST',
-        }
-      }
-      const allowedBy = matched.list
-
-      const filtered = await this.applyFilterLists(url)
-      if (filtered !== null) {
-        return { ...filtered, allowed_by_list: allowedBy }
-      }
-      const domainOnly = await this.applyDomainOnlyLists(url)
-      if (domainOnly !== null) {
-        return { ...domainOnly, allowed_by_list: allowedBy }
-      }
-      return { url, title, filtered: false, allowed_by_list: allowedBy }
-    }
-
-    const filtered = await this.applyFilterLists(url)
-    if (filtered !== null) {
-      return filtered
-    }
     const domainOnly = await this.applyDomainOnlyLists(url)
     if (domainOnly !== null) {
       return domainOnly
     }
-    return { url, title, filtered: false }
+
+    const allowAll = cfg?.allow_all === true
+    const allowedBy = allowAll ? undefined : await this.findAllowList(url)
+    if (!allowAll && allowedBy === null) {
+      return {
+        url: 'CATEGORY:NOT_ON_ALLOWLIST',
+        filtered: true,
+        filtered_by_list: 'NOT_ON_ALLOWLIST',
+      }
+    }
+    const allowedByField = allowedBy ? { allowed_by_list: allowedBy } : {}
+
+    const filtered = await this.applyFilterLists(url)
+    if (filtered !== null) {
+      return { ...filtered, ...allowedByField }
+    }
+    return { url, title, filtered: false, ...allowedByField }
+  }
+
+  private async findAllowList(url: string): Promise<string | null> {
+    for (const listName of this.config?.allow_lists ?? []) {
+      try {
+        if (await matchDomainAgainstList(url, listName)) {
+          return listName
+        }
+      } catch (err) {
+        console.warn(`${LOG_PREFIX} allow list error on ${listName}`, err)
+      }
+    }
+    return null
   }
 
   private async applyFilterLists(url: string): Promise<RedactionResult | null> {
@@ -660,6 +667,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
   private isEnabled(): boolean {
     return this.config !== null && this.config.enabled === true
+  }
+
+  private isEventTypeOn(eventType: PageEventType): boolean {
+    const configured = this.config?.event_types?.[eventType]
+    return typeof configured === 'boolean' ? configured : DEFAULT_EVENT_TYPES[eventType]
   }
 
   private saveTabState(): Promise<void> {
