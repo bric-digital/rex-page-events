@@ -16,6 +16,8 @@ export type EventTypeSwitch = Exclude<PageEventType, 'link_follow_end'>
 
 export type ClickType = 'primary' | 'middle' | 'right' | 'other'
 
+export type HiddenLinkMode = 'show' | 'text_only' | 'hide' | 'strict_hide'
+
 export type ModifierKey = 'shift' | 'control' | 'alt' | 'meta'
 
 export interface ScrollPosition {
@@ -65,6 +67,7 @@ export interface REXPageEventsConfiguration {
   allow_all?: boolean
   domain_only_lists?: string[]
   event_types?: Partial<Record<EventTypeSwitch, boolean>>
+  hidden_link_mode?: HiddenLinkMode
   debug?: boolean
   scroll_pause_delay?: number
 }

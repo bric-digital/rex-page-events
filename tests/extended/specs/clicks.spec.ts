@@ -42,6 +42,18 @@ async function openTestPage(context, body, origin = TEST_ORIGIN) {
   return { page, url }
 }
 
+async function addListEntry(serviceWorker, listName, host, category) {
+  await serviceWorker.evaluate(async ({ listName, host, category }) => {
+    await self.createListEntry({
+      list_name: listName,
+      pattern: host,
+      pattern_type: 'host',
+      source: 'backend',
+      metadata: { category },
+    })
+  }, { listName, host, category })
+}
+
 async function clicksOf(serviceWorker) {
   return serviceWorker.evaluate(() => self.__capturedEvents.filter((event) => event.event_type === 'click'))
 }
@@ -408,5 +420,92 @@ test.describe('click records', () => {
 
       expect(clicks.length).toBe(1)
     })
+  })
+})
+
+const HIDDEN_LINK_HOSTS = {
+  offAllowList: 'https://www.football.test',
+  filtered: 'https://filtered.test',
+  domainOnly: 'https://domain-only.test',
+}
+
+const HIDDEN_LINK_CASES = [
+  { name: 'a link off the allow list', link: 'offAllowList', hidden: 'CATEGORY:NOT_ON_ALLOWLIST', shown: 'https://www.football.test' },
+  { name: 'a link on a filter list', link: 'filtered', hidden: 'CATEGORY:TEST_FILTERED', shown: 'CATEGORY:TEST_FILTERED' },
+  { name: 'a link on a domain-only list', link: 'domainOnly', hidden: 'domain-only.test', shown: 'domain-only.test' },
+]
+
+const HIDDEN_LINK_MODES = [
+  { mode: undefined, keepsAddress: false, keepsText: true },
+  { mode: 'text_only', keepsAddress: false, keepsText: true },
+  { mode: 'bogus', keepsAddress: false, keepsText: true },
+  { mode: 'show', keepsAddress: true, keepsText: true },
+  { mode: 'hide', keepsAddress: false, keepsText: false },
+  { mode: 'strict_hide', keepsAddress: false, keepsText: false },
+]
+
+async function startWithLists(serviceWorker, hiddenLinkMode) {
+  await addListEntry(serviceWorker, 'click-allow', 'pages.test', 'ALLOWED')
+  await addListEntry(serviceWorker, 'click-allow', 'filtered.test', 'ALLOWED')
+  await addListEntry(serviceWorker, 'click-filter', 'filtered.test', 'TEST_FILTERED')
+  await addListEntry(serviceWorker, 'click-domain-only', 'domain-only.test', 'TEST_DOMAIN')
+
+  const pageEvents = {
+    allow_all: false,
+    allow_lists: ['click-allow'],
+    filter_lists: ['click-filter'],
+    domain_only_lists: ['click-domain-only'],
+  }
+
+  if (hiddenLinkMode !== undefined) {
+    pageEvents.hidden_link_mode = hiddenLinkMode
+  }
+
+  await startModule(serviceWorker, pageEvents)
+}
+
+test.describe('hidden_link_mode', () => {
+  for (const { name, link, hidden, shown } of HIDDEN_LINK_CASES) {
+    for (const { mode, keepsAddress, keepsText } of HIDDEN_LINK_MODES) {
+      test(`${name} under mode ${mode ?? 'default'}`, async ({ context, serviceWorker }) => {
+        await startWithLists(serviceWorker, mode)
+
+        const href = `${HIDDEN_LINK_HOSTS[link]}/secret-path`
+        const { page, url } = await openTestPage(context, `<a id="link" href="${href}" target="_blank">Football scores</a>`)
+        await page.click('#link')
+
+        const clicks = await settledClicks(page, serviceWorker)
+
+        expect(clicks.length).toBe(1)
+        expect(clicks[0].url).toBe(url)
+        expect(clicks[0].link_url).toBe(keepsAddress ? shown : hidden)
+        expect(clicks[0].link_text).toBe(keepsText ? 'Football scores' : undefined)
+      })
+    }
+  }
+
+  test('a link whose address the lists keep is unaffected by the mode', async ({ context, serviceWorker }) => {
+    await startWithLists(serviceWorker, 'strict_hide')
+
+    const { page } = await openTestPage(context, '<a id="link" href="/destination" target="_blank">Kept text</a>')
+    await page.click('#link')
+
+    const clicks = await settledClicks(page, serviceWorker)
+
+    expect(clicks[0].link_url).toBe(`${TEST_ORIGIN}/destination`)
+    expect(clicks[0].link_text).toBe('Kept text')
+  })
+
+  test('on a page that is not allowed the click keeps no link text under show', async ({ context, serviceWorker }) => {
+    await startWithLists(serviceWorker, 'show')
+
+    const { page } = await openTestPage(context, '<a id="link" href="/destination" target="_blank">Hidden text</a>', 'https://other-page.test')
+    await page.click('#link')
+
+    const clicks = await settledClicks(page, serviceWorker)
+
+    expect(clicks[0].url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
+    expect(clicks[0].link_url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
+    expect(clicks[0].link_text).toBeUndefined()
   })
 })

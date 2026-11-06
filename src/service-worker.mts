@@ -7,6 +7,7 @@ import rexCorePlugin, {
 import { matchDomainAgainstList } from '@bric/rex-lists'
 import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
+import { type ClickLinkFields, clickLinkFieldsFor, hiddenLinkModeOf } from './hidden-link-mode.mjs'
 import { type ClickMessage, type EventTypeSwitch, type PageEventMessage, type PageEventType, type REXPageEventsConfiguration } from './types.mjs'
 
 // ---------------------------------------------------------------------------
@@ -522,7 +523,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
   private async clickExtras(message: ClickMessage, pageUrl: string): Promise<Record<string, unknown>> {
     const pageHidden = (await this.redact(pageUrl, message.title)).filtered
-    const linkUrl = message.link_url === undefined ? undefined : (await this.redact(message.link_url, '')).url
+    const linkFields = pageHidden ? await this.hiddenPageLinkFields(message) : await this.allowedPageLinkFields(message)
 
     return {
       click_id: message.click_id,
@@ -531,11 +532,28 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       modifier_keys: message.modifier_keys,
       click_count: message.click_count,
       on_link: message.on_link,
-      link_url: linkUrl,
-      link_text: pageHidden ? undefined : message.link_text,
+      ...linkFields,
       link_target: message.link_target,
       claimed: message.claim === undefined ? undefined : true,
     }
+  }
+
+  private async hiddenPageLinkFields(message: ClickMessage): Promise<Partial<ClickLinkFields>> {
+    if (message.link_url === undefined) {
+      return {}
+    }
+
+    return { link_url: (await this.redact(message.link_url, '')).url }
+  }
+
+  private async allowedPageLinkFields(message: ClickMessage): Promise<Partial<ClickLinkFields>> {
+    if (message.link_url === undefined) {
+      return { link_text: message.link_text }
+    }
+
+    const redaction = await this.redact(message.link_url, '')
+
+    return clickLinkFieldsFor(hiddenLinkModeOf(this.config?.hidden_link_mode), redaction, message.link_url, message.link_text)
   }
 
   // -------------------------------------------------------------------------
