@@ -6,6 +6,7 @@ export interface PendingClick {
   clickId: string
   tabId: number
   windowId: number
+  sessionId: string
   sourceUrl: string
   clickedAtMs: number
   linkUrl?: string

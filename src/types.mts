@@ -70,4 +70,5 @@ export interface REXPageEventsConfiguration {
   hidden_link_mode?: HiddenLinkMode
   debug?: boolean
   scroll_pause_delay?: number
+  link_follow_match_window?: number
 }

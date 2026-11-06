@@ -7,7 +7,21 @@ import rexCorePlugin, {
 import { matchDomainAgainstList } from '@bric/rex-lists'
 import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
+import {
+  type FollowState,
+  addPendingClick,
+  dropExpiredHeldNewTabs,
+  emptyFollowState,
+  holdNewTab,
+  matchWindowMsOf,
+  openFollow,
+  releaseHeldNewTab,
+  resolvePendingClick,
+  saveFollowState,
+  takeExpiredClicks,
+} from './follow-state.mjs'
 import { type ClickLinkFields, clickLinkFieldsFor, hiddenLinkModeOf, revealsOrigin } from './hidden-link-mode.mjs'
+import { type MatchedBy, type OpenMode, type PendingClick, matchNewTab, matchSameTab } from './link-follow.mjs'
 import { type ClickMessage, type EventTypeSwitch, type PageEventMessage, type PageEventType, type REXPageEventsConfiguration } from './types.mjs'
 
 // ---------------------------------------------------------------------------
@@ -105,6 +119,21 @@ function makeSessionId(): string {
   return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+function tabStateWithoutTab(sessionId: string, windowId: number, shownAtMs: number): TabState {
+  return {
+    sessionId,
+    windowId,
+    openedAtMs: shownAtMs,
+    lastFocusAtMs: null,
+    focusDurationMs: 0,
+    currentUrl: '',
+    currentUrlShownAtMs: shownAtMs,
+    currentUrlFocusMs: 0,
+    lastTitle: '',
+    priorUrl: null,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Module
 // ---------------------------------------------------------------------------
@@ -112,6 +141,7 @@ function makeSessionId(): string {
 class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   config: REXPageEventsConfiguration | null = null
   tabState: Map<number, TabState> = new Map()
+  followState: FollowState = emptyFollowState()
   listenersRegistered: boolean = false
   handlerQueue: Promise<void> = Promise.resolve()
 
@@ -283,6 +313,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     // the outbound event bus.
     this.deliverUrlActive(state, tab.id, url, now)
 
+    await this.resolveNewTabFollow(tab, tab.id, now)
+
     await this.saveTabState()
   }
 
@@ -335,6 +367,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       },
       state.currentUrlShownAtMs
     )
+
+    await this.resolveSameTabFollow(tabId, outgoingUrl, newUrl, now)
 
     // Reset segment state for the new URL.
     state.priorUrl = outgoingUrl
@@ -455,18 +489,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
     const now = Date.now()
     // window_close is window-level; no tab context.
-    const synthetic: TabState = {
-      sessionId: makeSessionId(),
-      windowId: windowId,
-      openedAtMs: now,
-      lastFocusAtMs: null,
-      focusDurationMs: 0,
-      currentUrl: '',
-      currentUrlShownAtMs: now,
-      currentUrlFocusMs: 0,
-      lastTitle: '',
-      priorUrl: null,
-    }
+    const synthetic = tabStateWithoutTab(makeSessionId(), windowId, now)
     await this.emit('window_close', synthetic, undefined, '', '', now, { window_id: windowId })
   }
 
@@ -517,6 +540,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     state.lastTitle = title
 
     await this.emit('click', state, tabId, url, title, timestamp, await this.clickExtras(message, url))
+    await this.startPendingFollow(message, sender.tab, state.sessionId, url, timestamp)
 
     await this.saveTabState()
   }
@@ -557,6 +581,155 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const filterRedaction = revealsOrigin(mode, redaction) ? await this.applyFilterLists(message.link_url) : null
 
     return clickLinkFieldsFor(mode, redaction, message.link_url, message.link_text, filterRedaction)
+  }
+
+  // -------------------------------------------------------------------------
+  // Link following
+  // -------------------------------------------------------------------------
+
+  private async startPendingFollow(
+    message: ClickMessage,
+    tab: chrome.tabs.Tab,
+    sessionId: string,
+    sourceUrl: string,
+    clickedAtMs: number
+  ) {
+    const startsFollow = message.on_link || message.claim !== undefined
+
+    if (tab.id === undefined || !startsFollow || !this.isEventTypeOn('link_follow') || !(await this.isAllowedPage(sourceUrl))) {
+      return
+    }
+
+    addPendingClick(this.followState, {
+      clickId: message.click_id,
+      tabId: tab.id,
+      windowId: tab.windowId,
+      sessionId,
+      sourceUrl,
+      clickedAtMs,
+      linkUrl: message.link_url,
+      claimed: message.claim !== undefined,
+      claimDestinationUrl: message.claim?.destination_url,
+      shiftHeld: message.modifier_keys.includes('shift'),
+    })
+    this.scheduleExpiry(clickedAtMs)
+
+    await this.resolveHeldNewTabs(Date.now())
+    await this.storeFollowState()
+  }
+
+  private matchWindowMs(): number {
+    return matchWindowMsOf(this.config?.link_follow_match_window)
+  }
+
+  private scheduleExpiry(clickedAtMs: number) {
+    const delayMs = Math.max(0, clickedAtMs + this.matchWindowMs() + 1 - Date.now())
+
+    self.setTimeout(() => {
+      this.enqueue(() => this.expirePendingClicks())
+    }, delayMs)
+  }
+
+  private async expirePendingClicks() {
+    const now = Date.now()
+    const expired = takeExpiredClicks(this.followState, now, this.matchWindowMs())
+
+    dropExpiredHeldNewTabs(this.followState, now, this.matchWindowMs())
+
+    for (const click of expired.filter((candidate) => candidate.claimed)) {
+      await this.emitLinkFollow(click, 'none', undefined, undefined, now)
+    }
+
+    await this.storeFollowState()
+  }
+
+  private async resolveSameTabFollow(tabId: number, fromUrl: string, toUrl: string, now: number) {
+    const click = matchSameTab(this.followState.pending, tabId, fromUrl, toUrl, now, this.matchWindowMs())
+
+    if (click !== null) {
+      await this.resolveFollow(click, 'same_tab', undefined, tabId, now)
+    }
+  }
+
+  private async resolveNewTabFollow(tab: chrome.tabs.Tab, tabId: number, now: number) {
+    if (!this.isEventTypeOn('link_follow')) {
+      return
+    }
+
+    const description = { openerTabId: tab.openerTabId, windowId: tab.windowId, pendingUrl: tab.pendingUrl, url: tab.url || undefined }
+    const match = matchNewTab(this.followState.pending, description, now, this.matchWindowMs())
+
+    if (match !== null) {
+      await this.resolveFollow(match.click, match.openMode, match.matchedBy, tabId, now)
+      return
+    }
+
+    holdNewTab(this.followState, { tabId, tab: description, createdAtMs: now })
+    this.scheduleExpiry(now)
+    await this.storeFollowState()
+  }
+
+  private async resolveHeldNewTabs(now: number) {
+    for (const held of [...this.followState.heldNewTabs]) {
+      const match = matchNewTab(this.followState.pending, held.tab, held.createdAtMs, this.matchWindowMs())
+
+      if (match !== null) {
+        releaseHeldNewTab(this.followState, held.tabId)
+        await this.resolveFollow(match.click, match.openMode, match.matchedBy, held.tabId, now)
+      }
+    }
+  }
+
+  private async resolveFollow(
+    click: PendingClick,
+    openMode: OpenMode,
+    matchedBy: MatchedBy | undefined,
+    targetTabId: number,
+    now: number
+  ) {
+    resolvePendingClick(this.followState, click)
+    openFollow(this.followState, {
+      clickId: click.clickId,
+      sourceTabId: click.tabId,
+      sourceUrl: click.sourceUrl,
+      targetTabId,
+      claimed: click.claimed,
+      openMode,
+    })
+
+    await this.emitLinkFollow(click, openMode, matchedBy, targetTabId, now)
+    await this.storeFollowState()
+  }
+
+  private async emitLinkFollow(
+    click: PendingClick,
+    openMode: OpenMode,
+    matchedBy: MatchedBy | undefined,
+    targetTabId: number | undefined,
+    now: number
+  ) {
+    await this.emit('link_follow', this.sourceTabStateOf(click), click.tabId, click.sourceUrl, '', now, {
+      click_id: click.clickId,
+      open_mode: openMode,
+      matched_by: matchedBy,
+      target_tab_id: targetTabId,
+      is_result: click.claimed,
+    })
+  }
+
+  private sourceTabStateOf(click: PendingClick): TabState {
+    const state = this.tabState.get(click.tabId)
+
+    return state !== undefined && state.sessionId === click.sessionId
+      ? state
+      : tabStateWithoutTab(click.sessionId, click.windowId, click.clickedAtMs)
+  }
+
+  private storeFollowState(): Promise<void> {
+    return saveFollowState(this.followState)
+      .catch((error: unknown) => {
+        console.debug(`${LOG_PREFIX} could not save follow state`, error)
+      })
   }
 
   // -------------------------------------------------------------------------
@@ -642,7 +815,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async redact(url: string, title: string): Promise<RedactionResult> {
-    const cfg = this.config
     if (!url) {
       return { url, title, filtered: false }
     }
@@ -652,9 +824,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return domainOnly
     }
 
-    const allowAll = cfg?.allow_all === true
-    const allowedBy = allowAll ? undefined : await this.findAllowList(url)
-    if (!allowAll && allowedBy === null) {
+    const { allowed, allowedBy } = await this.allowCheck(url)
+    if (!allowed) {
       return {
         url: 'CATEGORY:NOT_ON_ALLOWLIST',
         filtered: true,
@@ -668,6 +839,20 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return { ...filtered, ...allowedByField }
     }
     return { url, title, filtered: false, ...allowedByField }
+  }
+
+  private async isAllowedPage(url: string): Promise<boolean> {
+    return (await this.allowCheck(url)).allowed
+  }
+
+  private async allowCheck(url: string): Promise<{ allowed: boolean; allowedBy?: string }> {
+    if (this.config?.allow_all === true) {
+      return { allowed: true }
+    }
+
+    const allowedBy = await this.findAllowList(url)
+
+    return allowedBy === null ? { allowed: false } : { allowed: true, allowedBy }
   }
 
   private async findAllowList(url: string): Promise<string | null> {
