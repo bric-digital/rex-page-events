@@ -284,7 +284,7 @@ claimClick(clickId: string, claim?: ClickClaim): void
 
 - `clickIdFor(event)` returns the same ID for one DOM event, whoever calls it and in whatever order. It is the `click_id` of that click's record.
 - `claimClick(clickId, claim)` attaches a `ClickClaim` (`destination_url`, optional) to the click. A second claim for the same ID is merged into the first.
-- Each click is sent once, at the first of a `setTimeout(0)` scheduled from the capture listener and `pagehide`. A claim made before then, for example from a `document` capture listener, is recorded on the stored `click` as `claimed: true`; the claim itself, including any `destination_url`, is never stored. A claim made after the click is sent is not recorded.
+- Each click is sent once, at the first of a `setTimeout(0)` scheduled from the capture listener and `pagehide`. A claim made before then, for example from a `document` capture listener, is recorded on the stored `click` as `claimed: true`; the claim itself is never stored. On a click on a link, a claim's `destination_url` takes the place of the link's own address: `link_url` is that address, redacted as the lists and `hidden_link_mode` say, so a search engine's redirect link is never stored. A claim made after the click is sent is not recorded.
 - Sending does not depend on any bubble-phase listener, so a page that stops propagation still has its click recorded once.
 - A module that uses `clickIdFor` and `claimClick` must load the same copy of `@bric/rex-page-events/browser` as the extension. A second copy keeps its own IDs and claims, so they are not shared with the click record.
 
@@ -357,21 +357,23 @@ This module reads from the `page_events` section of the backend config.
 | `allow_all` | boolean | No | `false` | When `true`, every URL is allowed and `allow_lists` is not consulted. Domain-only and filter lists still apply. |
 | `event_types` | object | No | `click` and every other recorded type `true`; `link_follow` `false` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. `link_follow` is off by default and also switches `link_follow_end`; both are reserved for link following, which nothing records yet. |
 | `domain_only_lists` | string[] | No | `[]` | Matching URLs are replaced with hostname; title becomes `"DOMAIN ONLY"`. |
-| `hidden_link_mode` | string | No | `text_only` | What a click on an allowed page keeps of a link whose own address the lists hide: `show`, `text_only` or `hide`. Other values use the default. See below. |
+| `hidden_link_mode` | string | No | `show` while link following is on, `text_only` while it is off | What a click on an allowed page keeps of a link whose own address the lists hide: `show`, `text_only` or `hide`. Other values use the default. See below. |
 | `debug` | boolean | No | `false` | When `true`, `rex-page-url-active` records are additionally dispatched via the REX event bus so PDK and local-download persist them. Raw URLs leave the extension in this mode — use only for development/debugging. |
 | `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a finite number above 0 use the default. |
 
 ### hidden_link_mode
 
-Applies to a `click` on a page whose address is kept, when the clicked link's own address is hidden by the lists. A link whose address the lists keep is not affected.
+Applies to a `click` on a page whose address is kept, when the clicked link's own address is hidden by the lists, and to the `destination_url` of a `link_follow_end`. An address the lists keep is not affected.
 
-| Value | `link_url` | `link_text` |
+| Value | `link_url` and `destination_url` | `link_text` |
 |---|---|---|
-| `text_only` (default) | as the lists redact it | kept |
-| `show` | a link off the allow list keeps its origin (scheme and host), for example `https://www.example.com`; a link on a filter list stays `CATEGORY:<category>`, even when it is also off the allow list; a link on a domain-only list keeps its hostname | kept |
+| `show` (default while link following is on) | keeps result destinations only. For a claimed click, an address off the allow list keeps its origin (scheme and host), for example `https://www.example.com`; an address on a filter list stays `CATEGORY:<category>`, even when it is also off the allow list; an address on a domain-only list keeps its hostname. Every other address, including an unclaimed click's, is as the lists redact it | kept |
+| `text_only` (default while link following is off) | as the lists redact it | kept |
 | `hide` | as the lists redact it | left out |
 
-`hide` hides both the address and the text, with no exception. On a page whose address is hidden, a click keeps no `link_text` whatever the mode.
+`text_only` and `hide` make no exception, including for a claimed click. On a page whose address is hidden, a click keeps no `link_text` whatever the mode.
+
+With link following on, a claimed click's destination is tracked though it is not on the allow list, and `show` keeps its origin: the `click` record's `link_url` and the `link_follow_end` record's `destination_url`. `destination_url` is the address the destination tab loaded; when a claimed follow ends before the destination loads, it is the claim's `destination_url`, when the claim gives one. Set `hidden_link_mode` to `text_only` or `hide` to keep no destination origins. Link following is off by default.
 
 No mode overrides a filter list. To keep every address and every link text, set `allow_all: true` and configure no `filter_lists` and no `domain_only_lists`.
 

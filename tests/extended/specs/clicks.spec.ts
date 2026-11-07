@@ -332,11 +332,9 @@ test.describe('click records', () => {
 
       expect(clicks.length).toBe(1)
       expect(clicks[0].claimed).toBe(true)
-
-      const everything = await serviceWorker.evaluate(() => JSON.stringify(self.__capturedEvents))
-
-      expect(everything).not.toContain(CLAIMED_DESTINATION)
+      expect(clicks[0].link_url).toBe(CLAIMED_DESTINATION)
       expect('claim' in clicks[0]).toBe(false)
+      expect('destination_url' in clicks[0]).toBe(false)
     })
 
     test('a click outside a claimable area carries no claim', async ({ context, serviceWorker }) => {
@@ -432,18 +430,18 @@ const HIDDEN_LINK_HOSTS = {
 }
 
 const HIDDEN_LINK_CASES = [
-  { name: 'a link off the allow list', link: 'offAllowList', hidden: 'CATEGORY:NOT_ON_ALLOWLIST', shown: 'https://www.football.test' },
-  { name: 'a link on a filter list', link: 'filtered', hidden: 'CATEGORY:TEST_FILTERED', shown: 'CATEGORY:TEST_FILTERED' },
-  { name: 'a link on a filter list and off the allow list', link: 'filteredOffAllowList', hidden: 'CATEGORY:NOT_ON_ALLOWLIST', shown: 'CATEGORY:TEST_FILTERED' },
-  { name: 'a link on a domain-only list', link: 'domainOnly', hidden: 'domain-only.test', shown: 'domain-only.test' },
+  { name: 'a link off the allow list', link: 'offAllowList', hidden: 'CATEGORY:NOT_ON_ALLOWLIST' },
+  { name: 'a link on a filter list', link: 'filtered', hidden: 'CATEGORY:TEST_FILTERED' },
+  { name: 'a link on a filter list and off the allow list', link: 'filteredOffAllowList', hidden: 'CATEGORY:NOT_ON_ALLOWLIST' },
+  { name: 'a link on a domain-only list', link: 'domainOnly', hidden: 'domain-only.test' },
 ]
 
 const HIDDEN_LINK_MODES = [
-  { mode: undefined, keepsAddress: false, keepsText: true },
-  { mode: 'text_only', keepsAddress: false, keepsText: true },
-  { mode: 'bogus', keepsAddress: false, keepsText: true },
-  { mode: 'show', keepsAddress: true, keepsText: true },
-  { mode: 'hide', keepsAddress: false, keepsText: false },
+  { mode: undefined, keepsText: true },
+  { mode: 'text_only', keepsText: true },
+  { mode: 'bogus', keepsText: true },
+  { mode: 'show', keepsText: true },
+  { mode: 'hide', keepsText: false },
 ]
 
 async function startWithLists(serviceWorker, hiddenLinkMode) {
@@ -468,8 +466,8 @@ async function startWithLists(serviceWorker, hiddenLinkMode) {
 }
 
 test.describe('hidden_link_mode', () => {
-  for (const { name, link, hidden, shown } of HIDDEN_LINK_CASES) {
-    for (const { mode, keepsAddress, keepsText } of HIDDEN_LINK_MODES) {
+  for (const { name, link, hidden } of HIDDEN_LINK_CASES) {
+    for (const { mode, keepsText } of HIDDEN_LINK_MODES) {
       test(`${name} under mode ${mode ?? 'default'}`, async ({ context, serviceWorker }) => {
         await startWithLists(serviceWorker, mode)
 
@@ -481,7 +479,7 @@ test.describe('hidden_link_mode', () => {
 
         expect(clicks.length).toBe(1)
         expect(clicks[0].url).toBe(url)
-        expect(clicks[0].link_url).toBe(keepsAddress ? shown : hidden)
+        expect(clicks[0].link_url).toBe(hidden)
         expect(clicks[0].link_text).toBe(keepsText ? 'Football scores' : undefined)
       })
     }

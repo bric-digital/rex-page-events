@@ -26,7 +26,14 @@ import {
   takeExpiredClicks,
   windowCreatedAtMsOf,
 } from './follow-state.mjs'
-import { type ClickLinkFields, clickLinkFieldsFor, hiddenLinkModeOf, revealsOrigin } from './hidden-link-mode.mjs'
+import {
+  type ClickLinkFields,
+  type LinkRedaction,
+  clickLinkFieldsFor,
+  hiddenLinkModeOf,
+  keptAddressOf,
+  revealsOrigin,
+} from './hidden-link-mode.mjs'
 import {
   type EndReason,
   type MatchedBy,
@@ -36,7 +43,14 @@ import {
   matchNewTab,
   matchSameTab,
 } from './link-follow.mjs'
-import { type ClickMessage, type EventTypeSwitch, type PageEventMessage, type PageEventType, type REXPageEventsConfiguration } from './types.mjs'
+import {
+  type ClickMessage,
+  type EventTypeSwitch,
+  type HiddenLinkMode,
+  type PageEventMessage,
+  type PageEventType,
+  type REXPageEventsConfiguration,
+} from './types.mjs'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -613,24 +627,41 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async hiddenPageLinkFields(message: ClickMessage): Promise<Partial<ClickLinkFields>> {
-    if (message.link_url === undefined) {
+    const address = linkAddressOf(message)
+
+    if (address === undefined) {
       return {}
     }
 
-    return { link_url: (await this.redact(message.link_url, '')).url }
+    return { link_url: (await this.redact(address, '')).url }
   }
 
   private async allowedPageLinkFields(message: ClickMessage): Promise<Partial<ClickLinkFields>> {
-    if (message.link_url === undefined) {
+    const address = linkAddressOf(message)
+
+    if (address === undefined) {
       return { link_text: message.link_text }
     }
 
-    const redaction = await this.redact(message.link_url, '')
+    const claimed = message.claim !== undefined
+    const redaction = await this.redact(address, '')
+    const mode = this.hiddenLinkMode()
+    const filterRedaction = await this.filterRedactionFor(mode, claimed, redaction, address)
 
-    const mode = hiddenLinkModeOf(this.config?.hidden_link_mode)
-    const filterRedaction = revealsOrigin(mode, redaction) ? await this.applyFilterLists(message.link_url) : null
+    return clickLinkFieldsFor(mode, claimed, redaction, address, message.link_text, filterRedaction)
+  }
 
-    return clickLinkFieldsFor(mode, redaction, message.link_url, message.link_text, filterRedaction)
+  private hiddenLinkMode(): HiddenLinkMode {
+    return hiddenLinkModeOf(this.config?.hidden_link_mode, this.isEventTypeOn('link_follow'))
+  }
+
+  private filterRedactionFor(
+    mode: HiddenLinkMode,
+    claimed: boolean,
+    redaction: LinkRedaction,
+    address: string
+  ): Promise<LinkRedaction | null> {
+    return revealsOrigin(mode, claimed, redaction) ? this.applyFilterLists(address) : Promise.resolve(null)
   }
 
   // -------------------------------------------------------------------------
@@ -763,6 +794,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       sourceUrlShownAtMs: click.sourceUrlShownAtMs,
       targetTabId,
       claimed: click.claimed,
+      claimDestinationUrl: click.claimDestinationUrl,
       openMode,
       destinationUrl: knownDestinationUrl,
     })
@@ -874,11 +906,9 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     closeFollow(this.followState, follow.clickId)
 
     const sourceState = this.sourceTabStateOf(follow.sourceTabId, follow.sourceSessionId, follow.sourceWindowId, now)
-    const destinationUrl = follow.destinationUrl ?? this.tabState.get(follow.targetTabId)?.currentUrl ?? ''
-
     await this.emit('link_follow_end', sourceState, follow.sourceTabId, follow.sourceUrl, '', now, {
       click_id: follow.clickId,
-      destination_url: await this.redactDestination(destinationUrl),
+      destination_url: await this.redactDestination(this.destinationAddressOf(follow), follow.claimed),
       shown_at: follow.shownAtMs,
       first_focused_at: follow.firstFocusedAtMs,
       total_focus_duration_ms: this.timeInFrontOf(follow, now),
@@ -898,8 +928,20 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     return focusedMsAt(state.focusDurationMs, state.lastFocusAtMs, now) - follow.focusAtShownMs
   }
 
-  private async redactDestination(url: string): Promise<string> {
-    return (await this.redact(url, '')).url
+  private destinationAddressOf(follow: OpenFollow): string {
+    if (follow.shownAtMs === undefined && follow.claimDestinationUrl !== undefined) {
+      return follow.claimDestinationUrl
+    }
+
+    return follow.destinationUrl ?? this.tabState.get(follow.targetTabId)?.currentUrl ?? ''
+  }
+
+  private async redactDestination(url: string, claimed: boolean): Promise<string> {
+    const redaction = await this.redact(url, '')
+    const mode = this.hiddenLinkMode()
+    const filterRedaction = await this.filterRedactionFor(mode, claimed, redaction, url)
+
+    return keptAddressOf(mode, claimed, redaction, url, filterRedaction)
   }
 
   private storeFollowState(): Promise<void> {
@@ -1138,6 +1180,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     this.tabState.set(tabId, state)
     return state
   }
+}
+
+function linkAddressOf(message: ClickMessage): string | undefined {
+  return message.link_url === undefined ? undefined : message.claim?.destination_url ?? message.link_url
 }
 
 const plugin = new REXPageEventsServiceWorkerModule()
