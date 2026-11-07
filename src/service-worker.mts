@@ -13,15 +13,18 @@ import {
   addPendingClick,
   closeFollow,
   dropExpiredHeldNewTabs,
+  dropExpiredWindowCreations,
   emptyFollowState,
   followsTargeting,
   holdNewTab,
   matchWindowMsOf,
+  noteWindowCreated,
   openFollow,
   releaseHeldNewTab,
   resolvePendingClick,
   saveFollowState,
   takeExpiredClicks,
+  windowCreatedAtMsOf,
 } from './follow-state.mjs'
 import { type ClickLinkFields, clickLinkFieldsFor, hiddenLinkModeOf, revealsOrigin } from './hidden-link-mode.mjs'
 import {
@@ -271,6 +274,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     })
 
     if (chrome.windows !== undefined) {
+      if (chrome.windows.onCreated !== undefined) {
+        chrome.windows.onCreated.addListener((window) => {
+          this.enqueue(() => this.onWindowCreated(window))
+        })
+      }
       if (chrome.windows.onRemoved !== undefined) {
         chrome.windows.onRemoved.addListener((windowId) => {
           this.enqueue(() => this.onWindowRemoved(windowId))
@@ -287,6 +295,18 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   // -------------------------------------------------------------------------
   // Event handlers
   // -------------------------------------------------------------------------
+
+  private async onWindowCreated(window: chrome.windows.Window) {
+    if (window.id === undefined || !this.isEventTypeOn('link_follow')) {
+      return
+    }
+
+    const now = Date.now()
+
+    noteWindowCreated(this.followState, window.id, now)
+    this.scheduleExpiry(now)
+    await this.storeFollowState()
+  }
 
   private async onTabCreated(tab: chrome.tabs.Tab) {
     if (!this.isEnabled() || tab.id === undefined) {
@@ -666,6 +686,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const expired = takeExpiredClicks(this.followState, now, this.matchWindowMs())
 
     dropExpiredHeldNewTabs(this.followState, now, this.matchWindowMs())
+    dropExpiredWindowCreations(this.followState, now, this.matchWindowMs())
 
     for (const click of expired.filter((candidate) => candidate.claimed)) {
       await this.emitLinkFollow(click, 'none', undefined, undefined, now)
@@ -692,7 +713,9 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
 
     const description = { openerTabId: tab.openerTabId, windowId: tab.windowId, pendingUrl: tab.pendingUrl, url: tab.url || undefined }
-    const match = matchNewTab(this.followState.pending, description, now, this.matchWindowMs())
+    const match = matchNewTab(
+      this.followState.pending, description, now, this.matchWindowMs(), windowCreatedAtMsOf(this.followState, tab.windowId)
+    )
 
     if (match !== null) {
       await this.resolveFollow(match.click, match.openMode, match.matchedBy, tabId, newTabAddressOf(tab), now)
@@ -706,7 +729,9 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
   private async resolveHeldNewTabs(now: number) {
     for (const held of [...this.followState.heldNewTabs]) {
-      const match = matchNewTab(this.followState.pending, held.tab, held.createdAtMs, this.matchWindowMs())
+      const match = matchNewTab(
+        this.followState.pending, held.tab, held.createdAtMs, this.matchWindowMs(), windowCreatedAtMsOf(this.followState, held.tab.windowId)
+      )
 
       if (match !== null) {
         releaseHeldNewTab(this.followState, held.tabId)

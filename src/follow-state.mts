@@ -29,10 +29,11 @@ export interface FollowState {
   pending: PendingClick[]
   open: Map<string, OpenFollow>
   heldNewTabs: HeldNewTab[]
+  windowCreations: Map<number, number>
 }
 
 export function emptyFollowState(): FollowState {
-  return { pending: [], open: new Map(), heldNewTabs: [] }
+  return { pending: [], open: new Map(), heldNewTabs: [], windowCreations: new Map() }
 }
 
 export function matchWindowMsOf(configured: unknown): number {
@@ -69,6 +70,22 @@ export function dropExpiredHeldNewTabs(state: FollowState, nowMs: number, window
   state.heldNewTabs = state.heldNewTabs.filter((held) => nowMs - held.createdAtMs <= windowMs)
 }
 
+export function noteWindowCreated(state: FollowState, windowId: number, createdAtMs: number): void {
+  state.windowCreations.set(windowId, createdAtMs)
+}
+
+export function windowCreatedAtMsOf(state: FollowState, windowId: number): number | undefined {
+  return state.windowCreations.get(windowId)
+}
+
+export function dropExpiredWindowCreations(state: FollowState, nowMs: number, windowMs: number): void {
+  for (const [windowId, createdAtMs] of state.windowCreations) {
+    if (nowMs - createdAtMs > windowMs) {
+      state.windowCreations.delete(windowId)
+    }
+  }
+}
+
 function isSupersededBy(candidate: PendingClick, resolved: PendingClick): boolean {
   return candidate.tabId === resolved.tabId &&
     candidate.linkUrl === resolved.linkUrl &&
@@ -97,6 +114,7 @@ export function saveFollowState(state: FollowState): Promise<void> {
       pending: state.pending,
       open: Array.from(state.open.entries()),
       heldNewTabs: state.heldNewTabs,
+      windowCreations: Array.from(state.windowCreations.entries()),
     },
   })
 }
