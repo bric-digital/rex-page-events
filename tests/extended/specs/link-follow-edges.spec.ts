@@ -1,6 +1,6 @@
 // @ts-nocheck
 
-import { test, expect, BASE_CONFIG, loadConfig, waitForPageEventsConfig, resetCaptured } from './fixtures.js'
+import { test, expect, expectExactlyOne, BASE_CONFIG, loadConfig, waitForPageEventsConfig, resetCaptured } from './fixtures.js'
 
 const TEST_ORIGIN = 'https://pages.test'
 const DESTINATION_URL = `${TEST_ORIGIN}/destination`
@@ -74,7 +74,7 @@ test.describe('a new window with no opener', () => {
 
     const windowId = await createWindowWithoutOpener(serviceWorker, DESTINATION_URL)
 
-    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker))
 
     const [click] = await clicksOf(serviceWorker)
     const [follow] = await followsOf(serviceWorker)
@@ -107,7 +107,7 @@ test.describe('a new window with no opener', () => {
       plugin.enqueue(() => plugin.onWindowCreated({ id: 987002 }))
     }, DESTINATION_URL)
 
-    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker))
 
     const [click] = await clicksOf(serviceWorker)
     const [follow] = await followsOf(serviceWorker)
@@ -164,7 +164,7 @@ test.describe('a claimed click on an element with no address', () => {
 
     const { page } = await openTestPage(context, CLAIMED_ADDRESSLESS_SCRIPT_LINK)
     await Promise.all([page.waitForURL('**/destination'), page.click('#link')])
-    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker))
 
     const [click] = await clicksOf(serviceWorker)
     const [follow] = await followsOf(serviceWorker)

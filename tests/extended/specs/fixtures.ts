@@ -63,6 +63,19 @@ export const BASE_CONFIG = {
   }],
 }
 
+export const DUPLICATE_SETTLE_MS = 1000
+
+export async function expectExactlyOne(readRecords, pollOptions = {}) {
+  await expect.poll(async () => (await readRecords()).length, pollOptions).toBe(1)
+  await new Promise((resolve) => setTimeout(resolve, DUPLICATE_SETTLE_MS))
+
+  const records = await readRecords()
+
+  expect(records).toHaveLength(1)
+
+  return records
+}
+
 export async function loadConfig(serviceWorker, config) {
   return serviceWorker.evaluate(async (configArg) => {
     return new Promise((resolve) => {

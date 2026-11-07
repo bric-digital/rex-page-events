@@ -1,12 +1,13 @@
 // @ts-nocheck
 
-import { test, expect, BASE_CONFIG, loadConfig, waitForPageEventsConfig, resetCaptured } from './fixtures.js'
+import { test, expect, expectExactlyOne, BASE_CONFIG, loadConfig, waitForPageEventsConfig, resetCaptured } from './fixtures.js'
 import { evaluateInRestartedWorker, stopServiceWorker } from './worker-restart.js'
 
 const TEST_ORIGIN = 'https://pages.test'
 const OUTSIDE_ORIGIN = 'https://elsewhere.test'
 const DESTINATION_URL = `${TEST_ORIGIN}/destination`
 const PAGE_READY_MS = 1000
+const RESTART_WAIT_MS = 8000
 const DWELL_MS = 1000
 const AWAY_MS = 1500
 const SETTLE_MS = 1000
@@ -83,7 +84,7 @@ async function restartedEventsOf(context, probe, eventType) {
 }
 
 async function waitForRestartedEvents(context, probe, eventType) {
-  await expect.poll(async () => (await restartedEventsOf(context, probe, eventType)).length, { timeout: 8000 }).toBeGreaterThanOrEqual(1)
+  await expect.poll(async () => (await restartedEventsOf(context, probe, eventType)).length, { timeout: RESTART_WAIT_MS }).toBeGreaterThanOrEqual(1)
 
   return restartedEventsOf(context, probe, eventType)
 }
@@ -187,7 +188,7 @@ test.describe('link following across a service worker stop', () => {
 
     await Promise.all([page.waitForURL('**/destination'), page.click('#link')])
     await page.waitForLoadState('load')
-    await expect.poll(async () => (await capturedEvents(serviceWorker)).filter((event) => event.event_type === 'link_follow').length).toBe(1)
+    await expectExactlyOne(async () => (await capturedEvents(serviceWorker)).filter((event) => event.event_type === 'link_follow'))
     await page.waitForTimeout(DWELL_MS)
 
     await stopServiceWorker(context, probe)
@@ -223,9 +224,8 @@ test.describe('link following across a service worker stop', () => {
     await stopServiceWorker(context, probe)
     await page.waitForURL('**/destination')
 
-    const follows = await waitForRestartedEvents(context, probe, 'link_follow')
+    const follows = await expectExactlyOne(() => restartedEventsOf(context, probe, 'link_follow'), { timeout: RESTART_WAIT_MS })
 
-    expect(follows).toHaveLength(1)
     expect(follows[0]).toMatchObject({ click_id: click.click_id, tab_id: load.tab_id, open_mode: 'same_tab', is_result: true })
   })
 
@@ -292,9 +292,8 @@ test.describe('link following across a service worker stop', () => {
     await stopServiceWorker(context, probe)
     await page.goto(`${TEST_ORIGIN}/search?q=next`, { waitUntil: 'load' })
 
-    const ends = await waitForRestartedEvents(context, probe, 'link_follow_end')
+    const ends = await expectExactlyOne(() => restartedEventsOf(context, probe, 'link_follow_end'), { timeout: RESTART_WAIT_MS })
 
-    expect(ends).toHaveLength(1)
     expect(ends[0].end_reason).toBe('allow_listed_page')
     expect(ends[0].total_focus_duration_ms).toBe(0)
   })

@@ -1,6 +1,6 @@
 // @ts-nocheck
 
-import { test, expect, BASE_CONFIG, loadConfig, waitForPageEventsConfig, resetCaptured } from './fixtures.js'
+import { test, expect, expectExactlyOne, BASE_CONFIG, loadConfig, waitForPageEventsConfig, resetCaptured } from './fixtures.js'
 
 const TEST_ORIGIN = 'https://pages.test'
 const PAGE_READY_MS = 1000
@@ -76,7 +76,7 @@ test.describe('link_follow records', () => {
     const { page, url } = await openTestPage(context, SAME_TAB_LINK)
     await followSameTabLink(page)
 
-    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker))
 
     const [click] = await clicksOf(serviceWorker)
     const [follow] = await followsOf(serviceWorker)
@@ -100,7 +100,7 @@ test.describe('link_follow records', () => {
     const { page, url } = await openTestPage(context, NEW_TAB_LINK)
     await Promise.all([context.waitForEvent('page'), page.click('#link')])
 
-    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker))
 
     const [click] = await clicksOf(serviceWorker)
     const [follow] = await followsOf(serviceWorker)
@@ -126,7 +126,7 @@ test.describe('link_follow records', () => {
     const { page } = await openTestPage(context, CLAIMED_SAME_TAB_LINK)
     await followSameTabLink(page)
 
-    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker))
 
     const [follow] = await followsOf(serviceWorker)
 
@@ -271,7 +271,7 @@ test.describe('link_follow records', () => {
       const { page } = await openTestPage(context, CLAIMED_LATE_SCRIPT_NAVIGATION)
       await Promise.all([page.waitForURL('**/destination'), page.click('#go')])
 
-      await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+      await expectExactlyOne(() => followsOf(serviceWorker))
 
       const [follow] = await followsOf(serviceWorker)
 
@@ -369,9 +369,7 @@ async function followSameTabAndDwell(page, selector = '#link', destination = '**
 }
 
 async function onlyEnd(serviceWorker) {
-  await expect.poll(async () => (await endsOf(serviceWorker)).length).toBe(1)
-
-  const [end] = await endsOf(serviceWorker)
+  const [end] = await expectExactlyOne(() => endsOf(serviceWorker))
 
   return end
 }
@@ -472,7 +470,7 @@ test.describe('link_follow_end records', () => {
 
       const { page } = await openSource(context, link, { [HELD_OUTSIDE_URL]: HELD })
       await page.click('#link')
-      await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+      await expectExactlyOne(() => followsOf(serviceWorker))
       await page.waitForTimeout(DWELL_MS)
 
       const [follow] = await followsOf(serviceWorker)
@@ -548,7 +546,7 @@ test.describe('link_follow_end records', () => {
 
     const { page } = await openSource(context, '<a id="link" href="/held" target="_blank">Result title</a>', { [HELD_URL]: HELD })
     await page.click('#link')
-    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker))
     await page.waitForTimeout(DWELL_MS)
 
     const [follow] = await followsOf(serviceWorker)
@@ -817,13 +815,11 @@ test.describe('a same-tab navigation that arrives before its click', () => {
     await page.waitForTimeout(LATE_CLICK_GAP_MS * 3)
 
     await deliverInOrder(serviceWorker, [lateClick(tab, 'late-click', url)], navigatedAtMs)
-    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker))
     await page.waitForTimeout(DWELL_MS)
     await deliverInOrder(serviceWorker, [navigation({ ...tab, url: DESTINATION_URL }, url)])
 
-    await expect.poll(async () => (await endsOf(serviceWorker)).length).toBe(1)
-
-    const [end] = await endsOf(serviceWorker)
+    const [end] = await expectExactlyOne(() => endsOf(serviceWorker))
 
     expect(end).toMatchObject({ click_id: 'late-click', end_reason: 'back', before_load: false })
     expect(end.shown_at).toBeGreaterThanOrEqual(beforeCompletionMs)
@@ -835,7 +831,7 @@ test.describe('a same-tab navigation that arrives before its click', () => {
     const { page, url, tab } = await openLoadedSource(context, serviceWorker)
 
     await deliverInOrder(serviceWorker, [navigation(tab), lateClick(tab, 'late-click', url)])
-    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker))
     await page.waitForTimeout(SETTLE_MS)
 
     const leavingSource = (await eventsOf(serviceWorker, 'tab_url_change')).find((event) => event.tab_id === tab.id && event.url === url)
@@ -898,7 +894,7 @@ test.describe('a same-tab navigation that arrives before its click', () => {
     const load = await sourceTabOf(serviceWorker, url)
 
     await Promise.all([page.waitForURL(`${OUTSIDE_ORIGIN}/destination`), page.click('#link', { noWaitAfter: true })])
-    await expect.poll(async () => (await followsOf(serviceWorker)).length, { timeout: 8000 }).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker), { timeout: 8000 })
 
     const records = await serviceWorker.evaluate(() => self.__capturedEvents)
     const leftSource = records.findIndex((event) => event.event_type === 'tab_url_change' && event.tab_id === load.tab_id && event.url === url)
@@ -940,7 +936,7 @@ test.describe('linkFollowTotals', () => {
 
     const { page } = await openSource(context, '<a id="link" href="/held" target="_blank">Result title</a>', { [HELD_URL]: HELD })
     await page.click('#link')
-    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await expectExactlyOne(() => followsOf(serviceWorker))
     await page.waitForTimeout(DWELL_MS)
 
     const [follow] = await followsOf(serviceWorker)

@@ -1,6 +1,6 @@
 // @ts-nocheck
 
-import { test, expect, BASE_CONFIG, loadConfig, waitForPageEventsConfig, resetCaptured } from './fixtures.js'
+import { test, expect, expectExactlyOne, BASE_CONFIG, loadConfig, waitForPageEventsConfig, resetCaptured } from './fixtures.js'
 
 const TEST_ORIGIN = 'https://pages.test'
 const PAGE_READY_MS = 1000
@@ -13,6 +13,7 @@ const LINK_TEXT = 'Result title'
 
 const RESULT_DESTINATION = 'https://www.result.test/page?q=1#part'
 const RESULT_ORIGIN = 'https://www.result.test'
+const ALLOWED_FILTERED_DESTINATION = 'https://allowed-filtered.test/page?q=1'
 const REDIRECT_PAGE_DELAY_S = 1
 const BROKEN_FILTER_LIST = 'address-filter-broken'
 
@@ -72,6 +73,8 @@ async function startModule(serviceWorker, { linkFollow = true, hiddenLinkMode, e
   await addListEntry(serviceWorker, 'address-allow', 'pages.test', 'ALLOWED')
   await addListEntry(serviceWorker, 'address-allow', 'kept.test', 'ALLOWED')
   await addListEntry(serviceWorker, 'address-filter', 'filtered.test', 'TEST_FILTERED')
+  await addListEntry(serviceWorker, 'address-allow', 'allowed-filtered.test', 'ALLOWED')
+  await addListEntry(serviceWorker, 'address-filter', 'allowed-filtered.test', 'TEST_FILTERED')
   await addListEntry(serviceWorker, 'address-domain-only', 'domain-only.test', 'TEST_DOMAIN')
 
   const pageEvents = {
@@ -145,10 +148,8 @@ async function followAndReturn(page, destination) {
 }
 
 async function clickAndEnd(serviceWorker) {
-  await expect.poll(async () => (await eventsOf(serviceWorker, 'link_follow_end')).length, { timeout: END_WAIT_MS }).toBe(1)
-
+  const [end] = await expectExactlyOne(() => eventsOf(serviceWorker, 'link_follow_end'), { timeout: END_WAIT_MS })
   const [click] = await eventsOf(serviceWorker, 'click')
-  const [end] = await eventsOf(serviceWorker, 'link_follow_end')
 
   return { click, end }
 }
@@ -168,6 +169,7 @@ const CLAIMED_LIST_CASES = [
   { name: 'on a filter list and off the allow list is its category', destination: 'https://filtered.test/page?q=1', kept: 'CATEGORY:TEST_FILTERED' },
   { name: 'on a domain-only list is its hostname', destination: 'https://domain-only.test/page?q=1', kept: 'domain-only.test' },
   { name: 'on the allow list is kept in full', destination: 'https://kept.test/page?q=1', kept: 'https://kept.test/page?q=1' },
+  { name: 'on the allow list and a filter list is its category', destination: ALLOWED_FILTERED_DESTINATION, kept: 'CATEGORY:TEST_FILTERED' },
 ]
 
 test.describe('a claimed click under show, the default while link following is on', () => {
@@ -214,13 +216,30 @@ test.describe('a claimed click under show, the default while link following is o
   })
 })
 
+test.describe('a claimed destination on the allow list and a filter list', () => {
+  for (const mode of ['text_only', 'hide']) {
+    test(`stays its category under ${mode}, in link_url and destination_url`, async ({ context, serviceWorker }) => {
+      await startModule(serviceWorker, { hiddenLinkMode: mode })
+
+      const { page } = await openSource(context, claimedLink(ALLOWED_FILTERED_DESTINATION))
+      await followAndReturn(page, ALLOWED_FILTERED_DESTINATION)
+
+      const { click, end } = await clickAndEnd(serviceWorker)
+
+      expect(click.claimed).toBe(true)
+      expect(click.link_url).toBe('CATEGORY:TEST_FILTERED')
+      expect(end.destination_url).toBe('CATEGORY:TEST_FILTERED')
+    })
+  }
+})
+
 test.describe('a redirect link', () => {
   test('a claim\'s destination_url replaces a redirect link\'s address, and no record holds the redirect', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker)
 
     const { page } = await openSource(context, claimedRedirectLink(RESULT_DESTINATION, ' target="_blank"'))
     await page.click('#link')
-    await expect.poll(async () => (await eventsOf(serviceWorker, 'link_follow')).length).toBe(1)
+    await expectExactlyOne(() => eventsOf(serviceWorker, 'link_follow'))
     await page.waitForTimeout(DWELL_MS)
 
     const [follow] = await eventsOf(serviceWorker, 'link_follow')

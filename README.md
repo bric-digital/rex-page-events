@@ -33,7 +33,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `scroll` | Content-script `window.scroll`, after a pause of `scroll_pause_delay` (250 ms by default) | Also at the start, on leaving during a pause, and on return from the bfcache |
 | `click` | Content-script `click`, `contextmenu` and `auxclick`, in the capture phase | One record per button press, on a link or not; carries `click_type`, `modifier_keys` and link metadata |
 | `link_follow` | A click on a link, matched to the navigation or new tab it started, through `chrome.tabs` and `chrome.windows` events | Off by default; one record per followed link, on the source page |
-| `link_follow_end` | The same events, when the destination stops being followed | Off by default; one record per `link_follow`, with the destination and the time it was in front |
+| `link_follow_end` | The same events, when the destination stops being followed | Off by default; one record per `link_follow` that has a destination tab, with the destination and the time it was in front. A `link_follow` with `open_mode: none` has no end record |
 
 ### Where each field comes from
 
@@ -276,12 +276,12 @@ BRIC defines load, unload, scroll, click, link_follow and link_follow_end as fol
 
 ### link_follow and link_follow_end
 
-- **Definition:** `link_follow` is recorded when a click on a link of an allowed page opens a page: in the same tab, a new tab or a new window. `link_follow_end` is recorded once for each `link_follow`, when the destination stops being followed. Both are switched by `event_types.link_follow`, which is `false` by default.
+- **Definition:** `link_follow` is recorded when a click on a link of an allowed page opens a page: in the same tab, a new tab or a new window. `link_follow_end` is recorded once for each `link_follow` that has a destination tab, when the destination stops being followed. A `link_follow` with `open_mode: none` opened no page, so it has no `link_follow_end`; it is not a lost follow. Both are switched by `event_types.link_follow`, which is `false` by default.
 - **Why it is off by default:** the destination is not on the allow list. Following it means observing a tab outside the allow list, through the browser's tab and window events only (address, load, focus and close). Nothing runs on the destination page and nothing is recorded from it beyond what `hidden_link_mode` and the lists allow of its address.
 - **Matching:** a click starts a follow when it is a primary or middle click on a link, or a click another module claimed. It is matched to the first navigation of its tab, or the new tab or window opened by that tab, within `link_follow_match_window` milliseconds. A new tab matches by its opener, or by the click's address and time when the browser reports no opener. A double click gives one follow, for the second click. A link whose address is only a fragment, or `javascript:`, gives no follow. A claimed click with no navigation in the window gives a `link_follow` with `open_mode: none`.
-- **`link_follow` fields:** `click_id` (the `click_id` of the `click` record), `open_mode` (`same_tab`, `new_tab`, `new_window` or `none`), `matched_by` (`opener` or `address_and_time`), `target_tab_id` (the tab that shows the destination; absent for `none`), `is_result` (`true` only when another module claimed the click), and the usual `url` (the source page), `url_shown_at` (when the source page was shown), `session_id`, `tab_id` and `timestamp`. The record carries no judgment of the destination.
+- **`link_follow` fields:** `click_id` (the `click_id` of the `click` record), `open_mode` (`same_tab`, `new_tab`, `new_window` or `none`), `matched_by` (`opener` or `address_and_time`; present only for `new_tab` and `new_window`, absent for `same_tab` and `none`), `target_tab_id` (the tab that shows the destination; absent for `none`), `is_result` (`true` only when another module claimed the click), and the usual `url` (the source page), `url_shown_at` (when the source page was shown), `session_id`, `tab_id` and `timestamp`. The record carries no judgment of the destination.
 - **`link_follow_end` fields:** `click_id`, `destination_url` (as `hidden_link_mode` and the lists allow; see **Configuration**), `shown_at` (when the destination was shown; absent when it never was), `first_focused_at` (when the destination tab was first in front once shown; absent when it never was), `total_focus_duration_ms` (milliseconds the destination tab was in front after it was shown; 0 when it was not shown), `before_load` (`true` when the follow ended before the destination was shown), `end_reason`, and the usual source page fields as on `link_follow`.
-- **`end_reason`:** `back` (the source tab returned to the source page), `allow_listed_page` (the tab reached an allowed page), `new_follow` (a later click in the same source tab started another follow), `tab_closed` or `window_closed`.
+- **`end_reason`:** `back` (the destination tab returned to the source page's address), `allow_listed_page` (the destination tab reached an allowed page), `new_follow` (a new click in the destination tab started another follow), `tab_closed` or `window_closed`.
 - **Time in front:** the destination counts as shown at the target tab's first `status: 'complete'`. Time in front is the tab's focused time since then, the same focus clock as `tab_focus` and `tab_blur`; a window that loses focus stops it.
 - **Running totals:** while a follow is open, other modules can ask for its totals (see **Running totals for open follows**).
 - **Limits:**
@@ -289,6 +289,7 @@ BRIC defines load, unload, scroll, click, link_follow and link_follow_end as fol
   - A link opened from the right-click menu, or by dragging it, is not followed.
   - A destination counts as shown at its first full load, so a slow page, or a page left before it loaded, records `before_load: true` and `total_focus_duration_ms: 0`.
   - The first `status: 'complete'` waits for every subresource of the page, so a destination whose images or scripts load slowly is shown late.
+  - A new tab that finishes loading before its click is matched to it is not counted as shown: its follow records `before_load: true` and 0 ms. This is rare, because the click normally arrives within milliseconds of the new tab.
   - Any address change in the source tab within the match window after a link click opens a follow, so an address change without a page load could open a follow that is never shown.
   - A destination that moves on to another allowed page before it finishes loading, for example by a redirect, ends the follow there with `before_load: true`. Under `allow_all`, every page is allowed, so this applies to any such redirect.
 
@@ -404,7 +405,7 @@ Applies to a `click` on a page whose address is kept, when the clicked link's ow
 
 | Value | `link_url` and `destination_url` | `link_text` |
 |---|---|---|
-| `show` (default while link following is on) | keeps result destinations only. For a claimed click, an address off the allow list keeps its origin (scheme and host), for example `https://www.example.com`; an address on a filter list stays `CATEGORY:<category>`, even when it is also off the allow list; an address on a domain-only list keeps its hostname. Every other address, including an unclaimed click's, is as the lists redact it | kept |
+| `show` (default while link following is on) | keeps result destinations only. For a claimed click, an address off the allow list keeps its origin (scheme, host and any non-default port), for example `https://www.example.com`; an address on a filter list stays `CATEGORY:<category>`, even when it is also off the allow list; an address on a domain-only list keeps its hostname. Every other address, including an unclaimed click's, is as the lists redact it | kept |
 | `text_only` (default while link following is off) | as the lists redact it | kept |
 | `hide` | as the lists redact it | left out |
 
