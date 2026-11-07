@@ -1,6 +1,7 @@
-import { type BrowserContext, type CDPSession, type Page, type Worker } from '@playwright/test'
+import { type BrowserContext, type Page, type Worker } from '@playwright/test'
 
 import { test, expect, BASE_CONFIG, loadConfig, waitForPageEventsConfig, resetCaptured } from './fixtures.js'
+import { evaluateInRestartedWorker, stopServiceWorker } from './worker-restart.js'
 
 const TEST_ORIGIN = 'https://pages.test'
 const SETTLE_MS = 2000
@@ -14,11 +15,6 @@ interface CapturedEvent {
   session_id?: string
   url?: string
   [field: string]: unknown
-}
-
-interface TargetInfo {
-  targetId: string
-  type: string
 }
 
 let pageCount = 0
@@ -52,58 +48,6 @@ async function openTestPage(context: BrowserContext, body: string) {
   await page.goto(url)
 
   return { page, url }
-}
-
-async function workerTargets(cdp: CDPSession): Promise<TargetInfo[]> {
-  const { targetInfos } = await cdp.send('Target.getTargets')
-
-  return targetInfos.filter((target: TargetInfo) => target.type === 'service_worker')
-}
-
-async function stopServiceWorker(context: BrowserContext, page: Page) {
-  const cdp = await context.newCDPSession(page)
-
-  await cdp.send('ServiceWorker.enable')
-  await cdp.send('ServiceWorker.stopAllWorkers')
-
-  await expect.poll(async () => (await workerTargets(cdp)).length, { timeout: 5000 }).toBe(0)
-
-  await cdp.detach()
-}
-
-async function evaluateInRestartedWorker(context: BrowserContext, page: Page, expression: string): Promise<unknown> {
-  const cdp = await context.newCDPSession(page)
-
-  await expect.poll(async () => (await workerTargets(cdp)).length, { timeout: 5000 }).toBeGreaterThan(0)
-
-  const [target] = await workerTargets(cdp)
-  const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: target.targetId, flatten: false })
-
-  const messageId = 1
-  const answer = new Promise<unknown>((resolve) => {
-    cdp.on('Target.receivedMessageFromTarget', (event) => {
-      const message = JSON.parse(event.message)
-
-      if (event.sessionId === sessionId && message.id === messageId) {
-        resolve(message.result?.result?.value)
-      }
-    })
-  })
-
-  await cdp.send('Target.sendMessageToTarget', {
-    sessionId,
-    message: JSON.stringify({
-      id: messageId,
-      method: 'Runtime.evaluate',
-      params: { expression, returnByValue: true, awaitPromise: true },
-    }),
-  })
-
-  const value = await answer
-
-  await cdp.detach()
-
-  return value
 }
 
 async function capturedBeforeStop(serviceWorker: Worker): Promise<CapturedEvent[]> {

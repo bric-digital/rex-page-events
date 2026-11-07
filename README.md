@@ -7,16 +7,17 @@ REX module that records page, tab, and window lifecycle events and transmits the
 **rex-page-events** tracks when pages appear, disappear, gain focus, lose focus, when tabs open/navigate/close, and when browser windows close. Each observation produces a single event dispatched via `dispatchEvent` in rex-core. URLs can be redacted against lists managed by `rex-lists`, so sensitive sites can be tracked for **dwell time** without capturing the URL or page title.
 
 - Records page_show / page_hide / load / scroll / click (from content scripts)
+- Records link_follow / link_follow_end (off by default; see **link_follow and link_follow_end**)
 - Records tab_open / tab_url_change / tab_focus / tab_blur / tab_close / window_close (from the service worker). Focus comes only from the service worker, so it is recorded on every tab, including pages without the content script, and moving focus into a frame inside a page is not a focus change.
 - Per-tab session_id (UUID) minted at tab_open, carried on every subsequent event for that tab
-- Tab state is kept in `chrome.storage.session`, so a tab keeps its session_id and durations when Chrome stops and restarts the idle service worker. Session storage is cleared when the browser restarts and when the extension is updated, reloaded or disabled. A tab already open then starts a new session_id at its next address change or page event, with no `tab_open`, and its `tab_lifetime_ms`, focus and dwell times count from that event. A tab closed or brought to the front before then records nothing.
+- Tab state and link-following state are kept in `chrome.storage.session`, so a tab keeps its session_id and durations, and a pending click or open follow carries on, when Chrome stops and restarts the idle service worker. Session storage is cleared when the browser restarts and when the extension is updated, reloaded or disabled. A tab already open then starts a new session_id at its next address change or page event, with no `tab_open`, and its `tab_lifetime_ms`, focus and dwell times count from that event. A tab closed or brought to the front before then records nothing.
 - `tab_close` events carry `tab_lifetime_ms` and `focus_duration_ms` (accumulated time the tab was actually focused)
 - URL redaction via allow/filter/domain_only lists — redacted events still record dwell time. Every address is hidden until `allow_lists` or `allow_all` allows it.
-- Each event type can be switched off in configuration; all are on by default except `link_follow`, which is off by default. `link_follow` and `link_follow_end` are reserved for link following, which nothing records yet
+- Each event type can be switched off in configuration; all are on by default except `link_follow`, which is off by default. `link_follow` switches both `link_follow` and `link_follow_end`. Link following is off by default because it observes tabs outside the allow list, through the browser's tab and window events only; nothing runs on or is recorded from the destination page.
 
 ## Event Schema
 
-Every event shares the name `rex-page-event` and is distinguished by `event_type`. There are eleven event types in the current implementation.
+Every event shares the name `rex-page-event` and is distinguished by `event_type`. There are thirteen event types in the current implementation.
 
 | `event_type` | Source | Notes |
 |---|---|---|
@@ -31,13 +32,15 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `load` | Content-script `window.load`, or Navigation Timing when the script arrives after load | Once per document, at the time `load` began |
 | `scroll` | Content-script `window.scroll`, after a pause of `scroll_pause_delay` (250 ms by default) | Also at the start, on leaving during a pause, and on return from the bfcache |
 | `click` | Content-script `click`, `contextmenu` and `auxclick`, in the capture phase | One record per button press, on a link or not; carries `click_type`, `modifier_keys` and link metadata |
+| `link_follow` | A click on a link, matched to the navigation or new tab it started, through `chrome.tabs` and `chrome.windows` events | Off by default; one record per followed link, on the source page |
+| `link_follow_end` | The same events, when the destination stops being followed | Off by default; one record per `link_follow` that has a destination tab, with the destination and the time it was in front. A `link_follow` with `open_mode: none` has no end record |
 
 ### Where each field comes from
 
 | Field | Source |
 |---|---|
 | `name` | Hardcoded: `"rex-page-event"` for every event |
-| `event_type` | One of the eleven types in the table above |
+| `event_type` | One of the thirteen types in the table above |
 | `session_id` | `crypto.randomUUID()` — minted once on `tab_open` (or on first observed event for a tab whose `onCreated` was missed), then attached to every subsequent event for that tab |
 | `tab_id` | `chrome.tabs.*` listeners (the active listener's `tabId` argument), or `sender.tab.id` for content-script-originated events |
 | `window_id` | Same listeners / `sender.tab.windowId` |
@@ -225,7 +228,7 @@ URL fragments are matched **exactly**: `https://a/#x` and `https://a/#y` are tre
 
 ## Event definitions
 
-BRIC defines load, unload, scroll and click as follows. Each definition names its source, and changes when one of the conditions under **When a definition changes** applies.
+BRIC defines load, unload, scroll, click, link_follow and link_follow_end as follows. Each definition names its source, and changes when one of the conditions under **When a definition changes** applies.
 
 ### load
 
@@ -271,6 +274,25 @@ BRIC defines load, unload, scroll and click as follows. Each definition names it
   - Controls that are not links, such as buttons that script turns into navigation, record `on_link: false`.
   - Links inside a shadow root record `on_link: false`.
 
+### link_follow and link_follow_end
+
+- **Definition:** `link_follow` is recorded when a click on a link of an allowed page opens a page: in the same tab, a new tab or a new window. `link_follow_end` is recorded once for each `link_follow` that has a destination tab, when the destination stops being followed. A `link_follow` with `open_mode: none` opened no page, so it has no `link_follow_end`; it is not a lost follow. Both are switched by `event_types.link_follow`, which is `false` by default.
+- **Why it is off by default:** the destination is not on the allow list. Following it means observing a tab outside the allow list, through the browser's tab and window events only (address, load, focus and close). Nothing runs on the destination page and nothing is recorded from it beyond what `hidden_link_mode` and the lists allow of its address.
+- **Matching:** a click starts a follow when it is a primary or middle click on a link, or a click another module claimed. It is matched to the first navigation of its tab, or the new tab or window opened by that tab, within `link_follow_match_window` milliseconds. A new tab matches by its opener, or by the click's address and time when the browser reports no opener. A double click gives one follow, for the second click. A link whose address is only a fragment, or `javascript:`, gives no follow. A claimed click with no navigation in the window gives a `link_follow` with `open_mode: none`.
+- **`link_follow` fields:** `click_id` (the `click_id` of the `click` record), `open_mode` (`same_tab`, `new_tab`, `new_window` or `none`), `matched_by` (`opener` or `address_and_time`; present only for `new_tab` and `new_window`, absent for `same_tab` and `none`), `target_tab_id` (the tab that shows the destination; absent for `none`), `is_result` (`true` only when another module claimed the click), and the usual `url` (the source page), `url_shown_at` (when the source page was shown), `session_id`, `tab_id` and `timestamp`. The record carries no judgment of the destination.
+- **`link_follow_end` fields:** `click_id`, `destination_url` (as `hidden_link_mode` and the lists allow; see **Configuration**), `shown_at` (when the destination was shown; absent when it never was), `first_focused_at` (when the destination tab was first in front once shown; absent when it never was), `total_focus_duration_ms` (milliseconds the destination tab was in front after it was shown; 0 when it was not shown), `before_load` (`true` when the follow ended before the destination was shown), `end_reason`, and the usual source page fields as on `link_follow`.
+- **`end_reason`:** `back` (the destination tab returned to the source page's address), `allow_listed_page` (the destination tab reached an allowed page), `new_follow` (a new click in the destination tab started another follow), `tab_closed` or `window_closed`.
+- **Time in front:** the destination counts as shown at the target tab's first `status: 'complete'`. Time in front is the tab's focused time since then, the same focus clock as `tab_focus` and `tab_blur`; a window that loses focus stops it.
+- **Running totals:** while a follow is open, other modules can ask for its totals (see **Running totals for open follows**).
+- **Limits:**
+  - No `link_follow_end` is recorded when the browser quits or session storage is cleared; the follow is lost.
+  - A link opened from the right-click menu, or by dragging it, is not followed.
+  - A destination counts as shown at its first full load, so a slow page, or a page left before it loaded, records `before_load: true` and `total_focus_duration_ms: 0`.
+  - The first `status: 'complete'` waits for every subresource of the page, so a destination whose images or scripts load slowly is shown late.
+  - A new tab that finishes loading before its click is matched to it is not counted as shown: its follow records `before_load: true` and 0 ms. This is rare, because the click normally arrives within milliseconds of the new tab.
+  - Any address change in the source tab within the match window after a link click opens a follow, so an address change without a page load could open a follow that is never shown.
+  - A destination that moves on to another allowed page before it finishes loading, for example by a redirect, ends the follow there with `before_load: true`. Under `allow_all`, every page is allowed, so this applies to any such redirect.
+
 ### Click IDs and claims for other modules
 
 Other modules in the same page part can tie their own work to a click, and say where it leads. Both functions are named exports of `@bric/rex-page-events/browser`:
@@ -284,7 +306,7 @@ claimClick(clickId: string, claim?: ClickClaim): void
 
 - `clickIdFor(event)` returns the same ID for one DOM event, whoever calls it and in whatever order. It is the `click_id` of that click's record.
 - `claimClick(clickId, claim)` attaches a `ClickClaim` (`destination_url`, optional) to the click. A second claim for the same ID is merged into the first.
-- Each click is sent once, at the first of a `setTimeout(0)` scheduled from the capture listener and `pagehide`. A claim made before then, for example from a `document` capture listener, is recorded on the stored `click` as `claimed: true`; the claim itself, including any `destination_url`, is never stored. A claim made after the click is sent is not recorded.
+- Each click is sent once, at the first of a `setTimeout(0)` scheduled from the capture listener and `pagehide`. A claim made before then, for example from a `document` capture listener, is recorded on the stored `click` as `claimed: true`; the claim itself is never stored. On a click on a link, a claim's `destination_url` takes the place of the link's own address: `link_url` is that address, redacted as the lists and `hidden_link_mode` say, so a search engine's redirect link is never stored. A module that claims a redirect link should give the real destination as `destination_url`; otherwise the lists decide for the redirect address like any other. A claim made after the click is sent is not recorded.
 - Sending does not depend on any bubble-phase listener, so a page that stops propagation still has its click recorded once.
 - A module that uses `clickIdFor` and `claimClick` must load the same copy of `@bric/rex-page-events/browser` as the extension. A second copy keeps its own IDs and claims, so they are not shared with the click record.
 
@@ -343,6 +365,20 @@ if (urlActive?.subscribe) {
 
 A record is delivered at `tab_open` and at every `tab_url_change` — so a sibling module can maintain a small `(url, url_shown_at) → { tab_id, window_id, session_id }` lookup table and enrich its own outgoing records when a URL/time pair matches.
 
+### Running totals for open follows
+
+Another module in the service worker can ask for the totals of the follows that are open now. The message goes through rex-core's message handling, as other module messages do:
+
+```ts
+rexCorePlugin.handleMessage({ messageType: 'linkFollowTotals' }, null, (totals) => {
+  // totals: Array<{ click_id: string, shown: boolean, total_focus_duration_ms: number }>
+})
+```
+
+- `shown` is `true` once the destination has been shown.
+- `total_focus_duration_ms` is the time in front so far, worked out as `link_follow_end` works it out, and 0 while the destination has not been shown.
+- Follows that have ended are not listed. The list is empty when none is open or link following is off.
+
 ## Configuration
 
 This module reads from the `page_events` section of the backend config.
@@ -355,23 +391,27 @@ This module reads from the `page_events` section of the backend config.
 | `filter_lists` | string[] | No | `[]` | Names of `rex-lists` lists whose matching URLs are replaced with `CATEGORY:…`. |
 | `allow_lists` | string[] | No | `[]` | Names of `rex-lists` lists whose URLs keep their address. Every other URL is replaced with `CATEGORY:NOT_ON_ALLOWLIST`, so with no lists and no `allow_all` every address is hidden. |
 | `allow_all` | boolean | No | `false` | When `true`, every URL is allowed and `allow_lists` is not consulted. Domain-only and filter lists still apply. |
-| `event_types` | object | No | `click` and every other recorded type `true`; `link_follow` `false` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. `link_follow` is off by default and also switches `link_follow_end`; both are reserved for link following, which nothing records yet. |
+| `event_types` | object | No | `click` and every other recorded type `true`; `link_follow` `false` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. `link_follow` is off by default and also switches `link_follow_end`; it is off because link following observes tabs outside the allow list. |
 | `domain_only_lists` | string[] | No | `[]` | Matching URLs are replaced with hostname; title becomes `"DOMAIN ONLY"`. |
-| `hidden_link_mode` | string | No | `text_only` | What a click on an allowed page keeps of a link whose own address the lists hide: `show`, `text_only` or `hide`. Other values use the default. See below. |
+| `hidden_link_mode` | string | No | `show` while link following is on, `text_only` while it is off | What a click on an allowed page keeps of a link whose own address the lists hide: `show`, `text_only` or `hide`. Other values use the default. See below. |
 | `debug` | boolean | No | `false` | When `true`, `rex-page-url-active` records are additionally dispatched via the REX event bus so PDK and local-download persist them. Raw URLs leave the extension in this mode — use only for development/debugging. |
 | `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a finite number above 0 use the default. |
+| `event_types.link_follow` | boolean | No | `false` | Turns link following on: `link_follow` and `link_follow_end` records. See **link_follow and link_follow_end**. |
+| `link_follow_match_window` | number | No | `5000` | Milliseconds after a link click within which a navigation or new tab is matched to it. Values that are not a finite number above 0 use the default. |
 
 ### hidden_link_mode
 
-Applies to a `click` on a page whose address is kept, when the clicked link's own address is hidden by the lists. A link whose address the lists keep is not affected.
+Applies to a `click` on a page whose address is kept, when the clicked link's own address is hidden by the lists, and to the `destination_url` of a `link_follow_end`. An address the lists keep is not affected.
 
-| Value | `link_url` | `link_text` |
+| Value | `link_url` and `destination_url` | `link_text` |
 |---|---|---|
-| `text_only` (default) | as the lists redact it | kept |
-| `show` | a link off the allow list keeps its origin (scheme and host), for example `https://www.example.com`; a link on a filter list stays `CATEGORY:<category>`, even when it is also off the allow list; a link on a domain-only list keeps its hostname | kept |
+| `show` (default while link following is on) | keeps result destinations only. For a claimed click, an address off the allow list keeps its origin (scheme, host and any non-default port), for example `https://www.example.com`; an address on a filter list stays `CATEGORY:<category>`, even when it is also off the allow list; an address on a domain-only list keeps its hostname. Every other address, including an unclaimed click's, is as the lists redact it | kept |
+| `text_only` (default while link following is off) | as the lists redact it | kept |
 | `hide` | as the lists redact it | left out |
 
-`hide` hides both the address and the text, with no exception. On a page whose address is hidden, a click keeps no `link_text` whatever the mode.
+`text_only` and `hide` make no exception, including for a claimed click. On a page whose address is hidden, a click keeps no `link_text` whatever the mode.
+
+With link following on, a claimed click's destination is tracked though it is not on the allow list, and `show` keeps its origin: the `click` record's `link_url` and the `link_follow_end` record's `destination_url`. `destination_url` is the address the destination tab loaded. When the claim gives a `destination_url` other than the link's own address, a page loaded at the link's own address (the redirect) does not count as the destination, and a follow that ends before the destination loads takes the claim's `destination_url`. An address with no origin, such as `data:`, keeps no origin and stays as the lists redact it, as does an address whose filter list lookup fails. Set `hidden_link_mode` to `text_only` or `hide` to keep no destination origins. Link following is off by default.
 
 No mode overrides a filter list. To keep every address and every link text, set `allow_all: true` and configure no `filter_lists` and no `domain_only_lists`.
 
@@ -454,6 +494,8 @@ The `extended` specs:
 - `window-focus.spec.ts`: verifies that focusing another window blurs the tab in the window that lost focus and focuses the active tab of the one that gained it, and that a window regaining focus after the browser lost it restarts its active tab's focus. Playwright's Chromium fires no `windows.onFocusChanged`, so these tests pass the module the event Chrome sends; a real window switch is checked by hand.
 - `browser.spec.ts`: loads the browser part through rex-core's own injection and verifies page_hide's `persisted` flag on leaving a page the browser caches and one it does not, `load` when the script arrives before and after load, `scroll` at the start, after a pause, on leaving and on return from the bfcache, and the order of `scroll`, `page_hide` and `tab_close` when a tab is closed. Tests that need the bfcache set the fixture option `backForwardCache`, because Playwright otherwise starts Chromium with it disabled. It also verifies that moving focus into a frame inside a page and back records no focus change.
 - `service-worker-restart.spec.ts`: verifies that tab state survives Chrome stopping and restarting the idle service worker.
+- `link-follow.spec.ts`, `link-follow-addresses.spec.ts`, `link-follow-edges.spec.ts` and `link-follow-rules.spec.ts`: verify the `link_follow` and `link_follow_end` records, the match window, the address rules and `linkFollowTotals`.
+- `link-follow-restart.spec.ts`: verifies that a click wakes a stopped service worker and is recorded, that pending clicks and open follows survive a stop, and that a navigation reaching the worker before its click still matches.
 - `slow-handler.spec.ts`: verifies that a handler that never finishes logs a warning, and that handlers that finish do not.
 
 Add coverage here when changing behavior.

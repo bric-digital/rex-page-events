@@ -12,6 +12,10 @@ function claimableTarget(event) {
   return event.target instanceof Element && event.target.closest('.claimable') !== null ? event.target : null
 }
 
+function claimFor(target) {
+  return { destination_url: target.closest('.claimable').getAttribute('data-claim-destination') ?? CLAIMED_DESTINATION }
+}
+
 function noteClickId(target, clickId) {
   const seen = target.getAttribute('data-click-ids')
 
@@ -22,8 +26,16 @@ document.addEventListener('click', (event) => {
   const target = claimableTarget(event)
 
   if (target !== null) {
-    claimClick(clickIdFor(event), { destination_url: CLAIMED_DESTINATION })
+    claimClick(clickIdFor(event), claimFor(target))
     noteClickId(target, clickIdFor(event))
+  }
+}, true)
+
+document.addEventListener('contextmenu', (event) => {
+  const target = claimableTarget(event)
+
+  if (target !== null) {
+    claimClick(clickIdFor(event), claimFor(target))
   }
 }, true)
 
