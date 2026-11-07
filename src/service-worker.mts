@@ -37,6 +37,7 @@ import {
   type ClickLinkFields,
   type FilterListLookup,
   type LinkRedaction,
+  claimsRevealingOrigin,
   clickLinkFieldsFor,
   hiddenLinkModeOf,
   keptAddressOf,
@@ -647,7 +648,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
   private async clickExtras(message: ClickMessage, pageUrl: string): Promise<Record<string, unknown>> {
     const pageHidden = (await this.redact(pageUrl, message.title)).filtered
-    const linkFields = pageHidden ? await this.hiddenPageLinkFields(message) : await this.allowedPageLinkFields(message)
+    const linkFields = pageHidden ? await this.hiddenPageLinkFields(message) : await this.allowedPageLinkFields(message, pageUrl)
 
     return {
       click_id: message.click_id,
@@ -672,19 +673,19 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     return { link_url: (await this.redact(address, '')).url }
   }
 
-  private async allowedPageLinkFields(message: ClickMessage): Promise<Partial<ClickLinkFields>> {
+  private async allowedPageLinkFields(message: ClickMessage, pageUrl: string): Promise<Partial<ClickLinkFields>> {
     const address = linkAddressOf(message)
 
     if (address === undefined) {
       return { link_text: message.link_text }
     }
 
-    const claimed = message.claim !== undefined
+    const mayRevealOrigin = claimsRevealingOrigin(message.claim !== undefined, address, pageUrl)
     const redaction = await this.redact(address, '')
     const mode = this.hiddenLinkMode()
-    const filterLookup = await this.filterLookupFor(mode, claimed, redaction, address)
+    const filterLookup = await this.filterLookupFor(mode, mayRevealOrigin, redaction, address)
 
-    return clickLinkFieldsFor(mode, claimed, redaction, address, message.link_text, filterLookup)
+    return clickLinkFieldsFor(mode, mayRevealOrigin, redaction, address, message.link_text, filterLookup)
   }
 
   private hiddenLinkMode(): HiddenLinkMode {
