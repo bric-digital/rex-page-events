@@ -409,7 +409,7 @@ Applies to a `click` on a page whose address is kept, when the clicked link's ow
 | `text_only` (default while link following is off) | as the lists redact it | kept |
 | `hide` | as the lists redact it | left out |
 
-`text_only` and `hide` make no exception, including for a claimed click. On a page whose address is hidden, a click keeps no `link_text` whatever the mode.
+A claimed link whose origin is the clicked page's own origin keeps its address hidden under `show`, as the lists redact it. `text_only` and `hide` make no exception, including for a claimed click. On a page whose address is hidden, a click keeps no `link_text` whatever the mode.
 
 With link following on, a claimed click's destination is tracked though it is not on the allow list, and `show` keeps its origin: the `click` record's `link_url` and the `link_follow_end` record's `destination_url`. `destination_url` is the address the destination tab loaded. When the claim gives a `destination_url` other than the link's own address, a page loaded at the link's own address (the redirect) does not count as the destination, and a follow that ends before the destination loads takes the claim's `destination_url`. An address with no origin, such as `data:`, keeps no origin and stays as the lists redact it, as does an address whose filter list lookup fails. Set `hidden_link_mode` to `text_only` or `hide` to keep no destination origins. Link following is off by default.
 

@@ -14,6 +14,7 @@ const LINK_TEXT = 'Result title'
 const RESULT_DESTINATION = 'https://www.result.test/page?q=1#part'
 const RESULT_ORIGIN = 'https://www.result.test'
 const ALLOWED_FILTERED_DESTINATION = 'https://allowed-filtered.test/page?q=1'
+const LANDING_ORIGIN = 'http://localhost:9090'
 const REDIRECT_PAGE_DELAY_S = 1
 const BROKEN_FILTER_LIST = 'address-filter-broken'
 
@@ -29,6 +30,10 @@ function redirectLinkTo(destination) {
 
 function claimedLink(destination, { href = destination, target = '' } = {}) {
   return `<div class="claimable" data-claim-destination="${destination}"><a id="link" href="${href}"${target}>${LINK_TEXT}</a></div>`
+}
+
+function claimedLinkWithoutDestination(href, target = '') {
+  return `<div class="claimable" data-claim-without-destination><a id="link" href="${href}"${target}>${LINK_TEXT}</a></div>`
 }
 
 function claimedRedirectLink(destination, target = '') {
@@ -69,8 +74,19 @@ async function breakFilterListLookup(serviceWorker, listName) {
   }, listName)
 }
 
-async function startModule(serviceWorker, { linkFollow = true, hiddenLinkMode, extraFilterLists = [] } = {}) {
-  await addListEntry(serviceWorker, 'address-allow', 'pages.test', 'ALLOWED')
+async function allowPagesByPathPrefix(serviceWorker) {
+  await serviceWorker.evaluate(async () => {
+    await self.createListEntry({ list_name: 'address-allow', pattern: 'pages.test/source-', pattern_type: 'host_path_prefix', source: 'backend', metadata: { category: 'ALLOWED' } })
+  })
+}
+
+async function startModule(serviceWorker, { linkFollow = true, hiddenLinkMode, extraFilterLists = [], onlySourcePagesAllowed = false } = {}) {
+  if (onlySourcePagesAllowed) {
+    await allowPagesByPathPrefix(serviceWorker)
+  } else {
+    await addListEntry(serviceWorker, 'address-allow', 'pages.test', 'ALLOWED')
+  }
+
   await addListEntry(serviceWorker, 'address-allow', 'kept.test', 'ALLOWED')
   await addListEntry(serviceWorker, 'address-filter', 'filtered.test', 'TEST_FILTERED')
   await addListEntry(serviceWorker, 'address-allow', 'allowed-filtered.test', 'ALLOWED')
@@ -295,6 +311,46 @@ test.describe('addresses that must stay hidden under show', () => {
     const click = await clickOnly(page, serviceWorker)
 
     expect(click.link_url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
+  })
+})
+
+test.describe('a claimed link on the page\'s own site, with no destination in the claim', () => {
+  test('keeps its address hidden under show', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { onlySourcePagesAllowed: true })
+
+    const { page } = await openSource(context, claimedLinkWithoutDestination(redirectLinkTo(RESULT_DESTINATION), ' target="_blank"'))
+    const click = await clickOnly(page, serviceWorker)
+
+    expect(click.claimed).toBe(true)
+    expect(click.link_url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
+    expect(click.link_text).toBe(LINK_TEXT)
+  })
+
+  test('a redirect answered with an HTTP 302 records the landing page\'s origin as the destination', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { onlySourcePagesAllowed: true })
+
+    const landing = `${LANDING_ORIGIN}/`
+    const redirectLink = redirectLinkTo(landing)
+
+    const { page } = await openSource(context, claimedLinkWithoutDestination(redirectLink))
+    await context.route((address) => address.href === redirectLink, (route) => route.fulfill({ status: 302, headers: { location: landing } }))
+    await followAndReturn(page, landing)
+
+    const { click, end } = await clickAndEnd(serviceWorker)
+
+    expect(click.claimed).toBe(true)
+    expect(click.link_url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
+    expect(end.destination_url).toBe(LANDING_ORIGIN)
+    expect(await allRecordsText(serviceWorker)).not.toContain('/goto?')
+  })
+
+  test('control: a claimed link on another site keeps its origin under show', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { onlySourcePagesAllowed: true })
+
+    const { page } = await openSource(context, claimedLinkWithoutDestination('https://other.test/page', ' target="_blank"'))
+    const click = await clickOnly(page, serviceWorker)
+
+    expect(click.link_url).toBe('https://other.test')
   })
 })
 
