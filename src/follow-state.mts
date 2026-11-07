@@ -13,6 +13,7 @@ export interface OpenFollow {
   targetTabId: number
   claimed: boolean
   claimDestinationUrl?: string
+  redirectUrl?: string
   openMode: OpenMode
   shownAtMs?: number
   firstFocusedAtMs?: number

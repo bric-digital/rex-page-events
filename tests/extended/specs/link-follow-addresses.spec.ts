@@ -6,12 +6,15 @@ const TEST_ORIGIN = 'https://pages.test'
 const PAGE_READY_MS = 1000
 const DWELL_MS = 1000
 const SETTLE_MS = 1000
+const END_WAIT_MS = 10000
 const NEXT_PAGE = '<!doctype html><title>Next</title><p>Next</p>'
 const HELD = Symbol('held')
 const LINK_TEXT = 'Result title'
 
 const RESULT_DESTINATION = 'https://www.result.test/page?q=1#part'
 const RESULT_ORIGIN = 'https://www.result.test'
+const REDIRECT_PAGE_DELAY_S = 1
+const BROKEN_FILTER_LIST = 'address-filter-broken'
 
 let pageCount = 0
 
@@ -41,7 +44,31 @@ async function addListEntry(serviceWorker, listName, host, category) {
   }, { listName, host, category })
 }
 
-async function startModule(serviceWorker, { linkFollow = true, hiddenLinkMode } = {}) {
+function redirectPageTo(destination) {
+  return `${TEST_ORIGIN}/redirect?to=${encodeURIComponent(destination)}`
+}
+
+function redirectPageHtml(destination) {
+  return pageHtml('Redirecting', `<meta http-equiv="refresh" content="${REDIRECT_PAGE_DELAY_S};url=${destination}">`)
+}
+
+async function breakFilterListLookup(serviceWorker, listName) {
+  await serviceWorker.evaluate((brokenName) => {
+    const getAll = IDBIndex.prototype.getAll
+
+    self.__brokenLookups = 0
+    IDBIndex.prototype.getAll = function (query, ...rest) {
+      if (query === brokenName) {
+        self.__brokenLookups += 1
+        throw new Error('lookup failed')
+      }
+
+      return getAll.call(this, query, ...rest)
+    }
+  }, listName)
+}
+
+async function startModule(serviceWorker, { linkFollow = true, hiddenLinkMode, extraFilterLists = [] } = {}) {
   await addListEntry(serviceWorker, 'address-allow', 'pages.test', 'ALLOWED')
   await addListEntry(serviceWorker, 'address-allow', 'kept.test', 'ALLOWED')
   await addListEntry(serviceWorker, 'address-filter', 'filtered.test', 'TEST_FILTERED')
@@ -50,7 +77,7 @@ async function startModule(serviceWorker, { linkFollow = true, hiddenLinkMode } 
   const pageEvents = {
     enabled: true,
     allow_lists: ['address-allow'],
-    filter_lists: ['address-filter'],
+    filter_lists: [...extraFilterLists, 'address-filter'],
     domain_only_lists: ['address-domain-only'],
     event_types: { link_follow: linkFollow },
   }
@@ -74,6 +101,10 @@ async function serveSite(context) {
 
     if (requestUrl.origin === TEST_ORIGIN && requestUrl.pathname === '/goto') {
       return undefined
+    }
+
+    if (requestUrl.origin === TEST_ORIGIN && requestUrl.pathname === '/redirect') {
+      return route.fulfill({ contentType: 'text/html; charset=utf-8', body: redirectPageHtml(requestUrl.searchParams.get('to')) })
     }
 
     return route.fulfill({ contentType: 'text/html; charset=utf-8', body: NEXT_PAGE })
@@ -114,7 +145,7 @@ async function followAndReturn(page, destination) {
 }
 
 async function clickAndEnd(serviceWorker) {
-  await expect.poll(async () => (await eventsOf(serviceWorker, 'link_follow_end')).length).toBe(1)
+  await expect.poll(async () => (await eventsOf(serviceWorker, 'link_follow_end')).length, { timeout: END_WAIT_MS }).toBe(1)
 
   const [click] = await eventsOf(serviceWorker, 'click')
   const [end] = await eventsOf(serviceWorker, 'link_follow_end')
@@ -201,6 +232,50 @@ test.describe('a redirect link', () => {
     expect(end.before_load).toBe(true)
     expect(end.destination_url).toBe(RESULT_ORIGIN)
     expect(await allRecordsText(serviceWorker)).not.toContain('/goto?')
+  })
+})
+
+test.describe('a redirect page that loads before the destination', () => {
+  test('the claimed follow\'s destination and shown_at come from the page after it', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page } = await openSource(context, claimedLink(RESULT_DESTINATION, { href: redirectPageTo(RESULT_DESTINATION) }))
+    await Promise.all([page.waitForURL((address) => address.host === 'www.result.test'), page.click('#link')])
+    await page.waitForLoadState('load')
+    await page.waitForTimeout(DWELL_MS)
+    await page.goto(`${TEST_ORIGIN}/search?q=next`, { waitUntil: 'load' })
+
+    const { end } = await clickAndEnd(serviceWorker)
+    const leftRedirectAt = Math.max(...(await eventsOf(serviceWorker, 'tab_url_change'))
+      .filter((change) => change.url.includes('/redirect?'))
+      .map((change) => change.timestamp))
+
+    expect(end.end_reason).toBe('allow_listed_page')
+    expect(end.destination_url).toBe(RESULT_ORIGIN)
+    expect(Number.isFinite(leftRedirectAt)).toBe(true)
+    expect(end.shown_at).toBeGreaterThanOrEqual(leftRedirectAt)
+  })
+})
+
+test.describe('addresses that must stay hidden under show', () => {
+  test('a failed filter list lookup keeps a claimed address hidden', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { linkFollow: false, hiddenLinkMode: 'show', extraFilterLists: [BROKEN_FILTER_LIST] })
+    await breakFilterListLookup(serviceWorker, BROKEN_FILTER_LIST)
+
+    const { page } = await openSource(context, claimedRedirectLink(RESULT_DESTINATION, ' target="_blank"'))
+    const click = await clickOnly(page, serviceWorker)
+
+    expect(await serviceWorker.evaluate(() => self.__brokenLookups)).toBeGreaterThan(0)
+    expect(click.link_url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
+  })
+
+  test('a claimed data: address has no origin to keep', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { linkFollow: false, hiddenLinkMode: 'show' })
+
+    const { page } = await openSource(context, claimedRedirectLink('data:text/html,result', ' target="_blank"'))
+    const click = await clickOnly(page, serviceWorker)
+
+    expect(click.link_url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
   })
 })
 

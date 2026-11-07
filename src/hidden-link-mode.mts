@@ -10,6 +10,11 @@ export interface LinkRedaction {
   filtered_by_list?: string
 }
 
+export interface FilterListLookup {
+  match: LinkRedaction | null
+  failed: boolean
+}
+
 export interface ClickLinkFields {
   link_url: string
   link_text?: string
@@ -25,7 +30,9 @@ export function hiddenLinkModeOf(configured: unknown, linkFollowOn: boolean): Hi
 
 export function originOf(address: string): string | undefined {
   try {
-    return new URL(address).origin
+    const origin = new URL(address).origin
+
+    return origin === 'null' ? undefined : origin
   } catch {
     return undefined
   }
@@ -40,13 +47,13 @@ export function keptAddressOf(
   claimed: boolean,
   redaction: LinkRedaction,
   address: string,
-  filterRedaction: LinkRedaction | null,
+  filterLookup: FilterListLookup | null,
 ): string {
-  if (revealsOrigin(mode, claimed, redaction)) {
-    return filterRedaction?.url ?? originOf(address) ?? redaction.url
+  if (!revealsOrigin(mode, claimed, redaction) || filterLookup === null || filterLookup.failed) {
+    return redaction.url
   }
 
-  return redaction.url
+  return filterLookup.match?.url ?? originOf(address) ?? redaction.url
 }
 
 function keepsLinkText(mode: HiddenLinkMode, redaction: LinkRedaction): boolean {
@@ -59,10 +66,10 @@ export function clickLinkFieldsFor(
   redaction: LinkRedaction,
   address: string,
   text: string | undefined,
-  filterRedaction: LinkRedaction | null,
+  filterLookup: FilterListLookup | null,
 ): ClickLinkFields {
   return {
-    link_url: keptAddressOf(mode, claimed, redaction, address, filterRedaction),
+    link_url: keptAddressOf(mode, claimed, redaction, address, filterLookup),
     link_text: keepsLinkText(mode, redaction) ? text : undefined,
   }
 }

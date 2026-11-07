@@ -57,6 +57,12 @@ function isWithinWindow(clickedAtMs: number, atMs: number, windowMs: number): bo
   return elapsedMs >= 0 && elapsedMs <= windowMs
 }
 
+export function redirectAddressOf(click: PendingClick): string | undefined {
+  const leadsElsewhere = click.claimDestinationUrl !== undefined && click.claimDestinationUrl !== click.linkUrl
+
+  return click.claimed && leadsElsewhere ? click.linkUrl : undefined
+}
+
 function latestOf(clicks: PendingClick[]): PendingClick | null {
   return clicks.reduce<PendingClick | null>(
     (latest, candidate) => (latest === null || candidate.clickedAtMs >= latest.clickedAtMs ? candidate : latest),

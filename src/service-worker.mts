@@ -28,6 +28,7 @@ import {
 } from './follow-state.mjs'
 import {
   type ClickLinkFields,
+  type FilterListLookup,
   type LinkRedaction,
   clickLinkFieldsFor,
   hiddenLinkModeOf,
@@ -42,6 +43,7 @@ import {
   focusedMsAt,
   matchNewTab,
   matchSameTab,
+  redirectAddressOf,
 } from './link-follow.mjs'
 import {
   type ClickMessage,
@@ -646,22 +648,22 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const claimed = message.claim !== undefined
     const redaction = await this.redact(address, '')
     const mode = this.hiddenLinkMode()
-    const filterRedaction = await this.filterRedactionFor(mode, claimed, redaction, address)
+    const filterLookup = await this.filterLookupFor(mode, claimed, redaction, address)
 
-    return clickLinkFieldsFor(mode, claimed, redaction, address, message.link_text, filterRedaction)
+    return clickLinkFieldsFor(mode, claimed, redaction, address, message.link_text, filterLookup)
   }
 
   private hiddenLinkMode(): HiddenLinkMode {
     return hiddenLinkModeOf(this.config?.hidden_link_mode, this.isEventTypeOn('link_follow'))
   }
 
-  private filterRedactionFor(
+  private filterLookupFor(
     mode: HiddenLinkMode,
     claimed: boolean,
     redaction: LinkRedaction,
     address: string
-  ): Promise<LinkRedaction | null> {
-    return revealsOrigin(mode, claimed, redaction) ? this.applyFilterLists(address) : Promise.resolve(null)
+  ): Promise<FilterListLookup | null> {
+    return revealsOrigin(mode, claimed, redaction) ? this.lookUpFilterLists(address) : Promise.resolve(null)
   }
 
   // -------------------------------------------------------------------------
@@ -795,6 +797,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       targetTabId,
       claimed: click.claimed,
       claimDestinationUrl: click.claimDestinationUrl,
+      redirectUrl: redirectAddressOf(click),
       openMode,
       destinationUrl: knownDestinationUrl,
     })
@@ -836,8 +839,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async onTabComplete(tabId: number, tab: chrome.tabs.Tab) {
-    const unshown = followsTargeting(this.followState, tabId).filter((follow) => follow.shownAtMs === undefined)
     const state = this.tabState.get(tabId)
+    const loadedUrl = tab.url ?? state?.currentUrl
+    const unshown = followsTargeting(this.followState, tabId)
+      .filter((follow) => follow.shownAtMs === undefined && follow.redirectUrl !== loadedUrl)
 
     if (!this.isEnabled() || unshown.length === 0 || state === undefined) {
       return
@@ -849,7 +854,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       follow.shownAtMs = now
       follow.focusAtShownMs = focusedMsAt(state.focusDurationMs, state.lastFocusAtMs, now)
       follow.firstFocusedAtMs = state.lastFocusAtMs === null ? undefined : now
-      follow.destinationUrl = tab.url ?? state.currentUrl
+      follow.destinationUrl = loadedUrl
     }
 
     await this.storeFollowState()
@@ -939,9 +944,9 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   private async redactDestination(url: string, claimed: boolean): Promise<string> {
     const redaction = await this.redact(url, '')
     const mode = this.hiddenLinkMode()
-    const filterRedaction = await this.filterRedactionFor(mode, claimed, redaction, url)
+    const filterLookup = await this.filterLookupFor(mode, claimed, redaction, url)
 
-    return keptAddressOf(mode, claimed, redaction, url, filterRedaction)
+    return keptAddressOf(mode, claimed, redaction, url, filterLookup)
   }
 
   private storeFollowState(): Promise<void> {
@@ -1088,23 +1093,32 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async applyFilterLists(url: string): Promise<RedactionResult | null> {
+    return (await this.lookUpFilterLists(url)).match
+  }
+
+  private async lookUpFilterLists(url: string): Promise<{ match: RedactionResult | null; failed: boolean }> {
     const lists = this.config?.filter_lists ?? []
+    let failed = false
     for (const listName of lists) {
       try {
         const entry = await matchDomainAgainstList(url, listName)
         if (entry) {
           const category = (entry.metadata?.category as string | undefined) ?? null
           return {
-            url: `CATEGORY:${category ?? 'null'}`,
-            filtered: true,
-            filtered_by_list: listName,
+            match: {
+              url: `CATEGORY:${category ?? 'null'}`,
+              filtered: true,
+              filtered_by_list: listName,
+            },
+            failed,
           }
         }
       } catch (err) {
         console.warn(`${LOG_PREFIX} filter list error on ${listName}`, err)
+        failed = true
       }
     }
-    return null
+    return { match: null, failed }
   }
 
   private async applyDomainOnlyLists(url: string): Promise<RedactionResult | null> {
