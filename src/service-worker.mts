@@ -58,6 +58,8 @@ import {
 } from './link-follow.mjs'
 import {
   type ClickMessage,
+  type LinkFollowTotal,
+  type LinkFollowTotalsMessage,
   type EventTypeSwitch,
   type HiddenLinkMode,
   type PageEventMessage,
@@ -252,7 +254,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   handleMessage(
-    message: PageEventMessage | ClickMessage,
+    message: PageEventMessage | ClickMessage | LinkFollowTotalsMessage,
     sender: chrome.runtime.MessageSender,
     sendResponse: (response: unknown) => void
   ): boolean {
@@ -266,7 +268,21 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       sendResponse({ success: true })
       return true
     }
+    if (message && message.messageType === 'linkFollowTotals') {
+      this.enqueue(async () => {
+        sendResponse(this.linkFollowTotals(Date.now()))
+      })
+      return true
+    }
     return false
+  }
+
+  private linkFollowTotals(now: number): LinkFollowTotal[] {
+    return [...this.followState.open.values()].map((follow) => ({
+      click_id: follow.clickId,
+      shown: follow.shownAtMs !== undefined,
+      total_focus_duration_ms: this.timeInFrontOf(follow, now),
+    }))
   }
 
   // -------------------------------------------------------------------------

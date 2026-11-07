@@ -60,6 +60,16 @@ export interface ClickMessage {
   claim?: ClickClaim
 }
 
+export interface LinkFollowTotalsMessage {
+  messageType: 'linkFollowTotals'
+}
+
+export interface LinkFollowTotal {
+  click_id: string
+  shown: boolean
+  total_focus_duration_ms: number
+}
+
 export interface REXPageEventsConfiguration {
   enabled: boolean
   filter_lists?: string[]

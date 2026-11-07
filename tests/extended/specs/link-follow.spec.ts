@@ -868,3 +868,54 @@ test.describe('a same-tab navigation that arrives before its click', () => {
     expect(follow).toMatchObject({ click_id: click.click_id, open_mode: 'same_tab', target_tab_id: load.tab_id, is_result: true })
   })
 })
+
+const totalsOf = (serviceWorker) => serviceWorker.evaluate(() => new Promise((resolve) => {
+  self.rexCorePlugin.handleMessage({ messageType: 'linkFollowTotals' }, null, (response) => resolve(response))
+}))
+
+test.describe('linkFollowTotals', () => {
+  test('reports an open follow\'s rising milliseconds and shown', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page } = await openSource(context, NEW_TAB_LINK)
+    const [destination] = await Promise.all([context.waitForEvent('page'), page.click('#link')])
+    await destination.waitForLoadState('load')
+    await destination.waitForTimeout(DWELL_MS)
+
+    const [follow] = await followsOf(serviceWorker)
+    const [first] = await totalsOf(serviceWorker)
+    await destination.waitForTimeout(DWELL_MS)
+    const [second] = await totalsOf(serviceWorker)
+
+    expect(first).toEqual({ click_id: follow.click_id, shown: true, total_focus_duration_ms: expect.any(Number) })
+    expect(first.total_focus_duration_ms).toBeGreaterThan(0)
+    expect(second.total_focus_duration_ms).toBeGreaterThan(first.total_focus_duration_ms + DWELL_MS / 2)
+  })
+
+  test('a destination still loading reports shown false and 0 ms', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page } = await openSource(context, '<a id="link" href="/held" target="_blank">Result title</a>', { [HELD_URL]: HELD })
+    await page.click('#link')
+    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await page.waitForTimeout(DWELL_MS)
+
+    const [follow] = await followsOf(serviceWorker)
+
+    expect(await totalsOf(serviceWorker)).toEqual([{ click_id: follow.click_id, shown: false, total_focus_duration_ms: 0 }])
+  })
+
+  test('control: an ended follow and a quiet module report nothing', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    expect(await totalsOf(serviceWorker)).toEqual([])
+
+    const { page } = await openSource(context, NEW_TAB_LINK)
+    const [destination] = await Promise.all([context.waitForEvent('page'), page.click('#link')])
+    await destination.waitForLoadState('load')
+    await destination.close()
+    await onlyEnd(serviceWorker)
+
+    expect(await totalsOf(serviceWorker)).toEqual([])
+  })
+})
