@@ -290,7 +290,7 @@ BRIC defines load, unload, scroll, click, link_follow and link_follow_end as fol
   - A destination counts as shown at its first full load, so a slow page, or a page left before it loaded, records `before_load: true` and `total_focus_duration_ms: 0`.
   - The first `status: 'complete'` waits for every subresource of the page, so a destination whose images or scripts load slowly is shown late.
   - Any address change in the source tab within the match window after a link click opens a follow, so an address change without a page load could open a follow that is never shown.
-  - While a destination is still loading, reaching an allowed page becomes the destination instead of ending the follow.
+  - A destination that moves on to another allowed page before it finishes loading, for example by a redirect, ends the follow there with `before_load: true`. Under `allow_all`, every page is allowed, so this applies to any such redirect.
 
 ### Click IDs and claims for other modules
 

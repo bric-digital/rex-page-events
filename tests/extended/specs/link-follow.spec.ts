@@ -283,6 +283,9 @@ test.describe('link_follow records', () => {
 const DESTINATION_URL = `${TEST_ORIGIN}/destination`
 const HELD_URL = `${TEST_ORIGIN}/held`
 const OUTSIDE_ORIGIN = 'https://elsewhere.test'
+const HELD_OUTSIDE_URL = `${OUTSIDE_ORIGIN}/held`
+const HELD_OUTSIDE_LINK = `<a id="link" href="${HELD_OUTSIDE_URL}" target="_blank">Result title</a>`
+const NEXT_SEARCH_URL = `${TEST_ORIGIN}/search?q=next`
 const DWELL_MS = 1000
 const AWAY_MS = 1500
 const REDIRECT_DELAY_MS = 500
@@ -459,6 +462,30 @@ test.describe('link_follow_end records', () => {
     expect(end.destination_url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
     expect(end.before_load).toBe(false)
   })
+
+  for (const { name, link, kept } of [
+    { name: 'an unclaimed', link: HELD_OUTSIDE_LINK, kept: 'CATEGORY:NOT_ON_ALLOWLIST' },
+    { name: 'a claimed', link: `<div class="claimable" data-claim-destination="${HELD_OUTSIDE_URL}">${HELD_OUTSIDE_LINK}</div>`, kept: OUTSIDE_ORIGIN },
+  ]) {
+    test(`${name} follow still loading ends with allow_listed_page when its tab reaches an allowed page`, async ({ context, serviceWorker }) => {
+      await startWithAllowList(serviceWorker)
+
+      const { page } = await openSource(context, link, { [HELD_OUTSIDE_URL]: HELD })
+      await page.click('#link')
+      await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+      await page.waitForTimeout(DWELL_MS)
+
+      const [follow] = await followsOf(serviceWorker)
+      await serviceWorker.evaluate(({ tabId, url }) => chrome.tabs.update(tabId, { url }), { tabId: follow.target_tab_id, url: NEXT_SEARCH_URL })
+
+      const end = await onlyEnd(serviceWorker)
+
+      expect(end).toMatchObject({ end_reason: 'allow_listed_page', before_load: true, total_focus_duration_ms: 0 })
+      expect(end.destination_url).not.toBe(NEXT_SEARCH_URL)
+      expect(end.destination_url).toBe(kept)
+      expect('shown_at' in end).toBe(false)
+    })
+  }
 
   test('a second follow from the same tab ends the first with new_follow', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker)

@@ -166,6 +166,10 @@ function newTabAddressOf(tab: chrome.tabs.Tab): string | undefined {
   return tab.pendingUrl ?? (tab.url || undefined)
 }
 
+function isOnTheWayToDestination(follow: OpenFollow, url: string): boolean {
+  return follow.shownAtMs === undefined && (url === follow.redirectUrl || url === follow.destinationUrl)
+}
+
 function tabStateWithoutTab(sessionId: string, windowId: number, shownAtMs: number): TabState {
   return {
     sessionId,
@@ -962,13 +966,13 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
 
-    for (const follow of follows.filter((open) => open.shownAtMs === undefined)) {
-      follow.destinationUrl = newUrl
-    }
+    const allowedPage = await this.isAllowedPage(newUrl)
 
-    if (await this.isAllowedPage(newUrl)) {
-      for (const follow of follows.filter((open) => open.shownAtMs !== undefined)) {
+    for (const follow of follows) {
+      if (allowedPage && !isOnTheWayToDestination(follow, newUrl)) {
         await this.endFollow(follow, 'allow_listed_page', now)
+      } else if (follow.shownAtMs === undefined) {
+        follow.destinationUrl = newUrl
       }
     }
 
