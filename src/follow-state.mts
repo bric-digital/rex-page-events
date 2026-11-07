@@ -6,10 +6,17 @@ export const DEFAULT_LINK_FOLLOW_MATCH_WINDOW_MS = 5000
 export interface OpenFollow {
   clickId: string
   sourceTabId: number
+  sourceSessionId: string
+  sourceWindowId: number
   sourceUrl: string
+  sourceUrlShownAtMs: number
   targetTabId: number
   claimed: boolean
   openMode: OpenMode
+  shownAtMs?: number
+  firstFocusedAtMs?: number
+  focusAtShownMs?: number
+  destinationUrl?: string
 }
 
 export interface HeldNewTab {
@@ -74,6 +81,14 @@ export function resolvePendingClick(state: FollowState, resolved: PendingClick):
 
 export function openFollow(state: FollowState, follow: OpenFollow): void {
   state.open.set(follow.clickId, follow)
+}
+
+export function followsTargeting(state: FollowState, tabId: number): OpenFollow[] {
+  return Array.from(state.open.values()).filter((follow) => follow.targetTabId === tabId)
+}
+
+export function closeFollow(state: FollowState, clickId: string): void {
+  state.open.delete(clickId)
 }
 
 export function saveFollowState(state: FollowState): Promise<void> {

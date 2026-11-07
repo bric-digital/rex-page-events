@@ -8,6 +8,7 @@ export interface PendingClick {
   windowId: number
   sessionId: string
   sourceUrl: string
+  sourceUrlShownAtMs: number
   clickedAtMs: number
   linkUrl?: string
   claimed: boolean
