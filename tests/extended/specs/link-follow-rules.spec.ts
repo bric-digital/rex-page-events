@@ -198,6 +198,12 @@ test.describe('matchNewTab', () => {
       expect(result?.matchedBy).toBe('address_and_time')
     })
 
+    test('matches by the tab address when the pending address is empty', async ({ serviceWorker }) => {
+      const result = await matchTab(serviceWorker, [shiftClick], { windowId: 11, pendingUrl: '', url: 'https://b.example/page' }, 2000, 1500)
+
+      expect(result?.matchedBy).toBe('address_and_time')
+    })
+
     test('control: without Shift it does not match', async ({ serviceWorker }) => {
       expect(await matchTab(serviceWorker, [click()], tab, 2000, 1500)).toBeNull()
     })
@@ -216,6 +222,20 @@ test.describe('matchNewTab', () => {
       expect(await matchTab(serviceWorker, [shiftClick], tab, 2000)).toBeNull()
     })
   })
+})
+
+test.describe('newTabAddressOf', () => {
+  for (const { name, tab, expected } of [
+    { name: 'the pending address first', tab: { pendingUrl: 'https://b.example/pending', url: 'https://b.example/current' }, expected: 'https://b.example/pending' },
+    { name: 'the tab address when the pending address is missing', tab: { url: 'https://b.example/current' }, expected: 'https://b.example/current' },
+    { name: 'the tab address when the pending address is empty', tab: { pendingUrl: '', url: 'https://b.example/current' }, expected: 'https://b.example/current' },
+    { name: 'undefined when both are empty', tab: { pendingUrl: '', url: '' }, expected: undefined },
+    { name: 'undefined when both are missing', tab: {}, expected: undefined },
+  ]) {
+    test(`returns ${name}`, async ({ serviceWorker }) => {
+      expect(await call(serviceWorker, 'newTabAddressOf', [tab])).toBe(expected)
+    })
+  }
 })
 
 test.describe('focusedMsAt', () => {

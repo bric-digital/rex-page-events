@@ -99,8 +99,8 @@ function preferredByAddress(clicks: PendingClick[], address: string | undefined)
   return latestOf(byLinkUrl.length > 0 ? byLinkUrl : byAnyAddress)
 }
 
-function newTabAddress(tab: NewTabDescription): string | undefined {
-  return tab.pendingUrl ?? tab.url
+export function newTabAddressOf(tab: { pendingUrl?: string; url?: string }): string | undefined {
+  return tab.pendingUrl || tab.url || undefined
 }
 
 export function matchSameTab(
@@ -141,7 +141,7 @@ function matchByOpener(
   const fromOpener = pending.filter(
     (click) => click.tabId === tab.openerTabId && isWithinWindow(click.clickedAtMs, atMs, windowMs),
   )
-  const click = preferredByAddress(fromOpener, newTabAddress(tab)) ?? latestOf(fromOpener)
+  const click = preferredByAddress(fromOpener, newTabAddressOf(tab)) ?? latestOf(fromOpener)
 
   if (click === null) {
     return null
@@ -157,7 +157,7 @@ function matchByAddressAndTime(
   windowMs: number,
   windowCreatedAtMs: number | undefined,
 ): NewTabMatch | null {
-  const address = newTabAddress(tab)
+  const address = newTabAddressOf(tab)
 
   if (windowCreatedAtMs === undefined || address === undefined) {
     return null

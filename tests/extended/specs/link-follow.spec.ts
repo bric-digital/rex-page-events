@@ -611,6 +611,22 @@ test.describe('link_follow_end records', () => {
     expect(judgmentFields).toEqual([])
   })
 
+  test('neither link_follow nor link_follow_end has a title on an allowed source page', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page } = await openSource(context, SAME_TAB_LINK)
+    await followSameTabAndDwell(page)
+    await page.goBack({ waitUntil: 'load' })
+    await onlyEnd(serviceWorker)
+
+    const [click] = await clicksOf(serviceWorker)
+    const records = [...await followsOf(serviceWorker), ...await endsOf(serviceWorker)]
+
+    expect(click.title).toMatch(/^Source /)
+    expect(records.length).toBe(2)
+    expect(records.filter((record) => 'title' in record)).toEqual([])
+  })
+
   for (const { name, address } of [
     { name: 'another window', address: 'about:blank' },
     { name: 'the extension\'s own page in its own window', address: undefined },

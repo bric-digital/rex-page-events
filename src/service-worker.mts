@@ -54,6 +54,7 @@ import {
   matchHeldNavigation,
   matchNewTab,
   matchSameTab,
+  newTabAddressOf,
   redirectAddressOf,
 } from './link-follow.mjs'
 import {
@@ -160,10 +161,6 @@ function makeSessionId(): string {
     return crypto.randomUUID()
   }
   return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-}
-
-function newTabAddressOf(tab: chrome.tabs.Tab): string | undefined {
-  return tab.pendingUrl ?? (tab.url || undefined)
 }
 
 function isOnTheWayToDestination(follow: OpenFollow, url: string): boolean {
@@ -844,7 +841,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
       if (match !== null) {
         releaseHeldNewTab(this.followState, held.tabId)
-        await this.resolveFollow(match.click, match.openMode, match.matchedBy, held.tabId, held.tab.pendingUrl ?? held.tab.url, now)
+        await this.resolveFollow(match.click, match.openMode, match.matchedBy, held.tabId, newTabAddressOf(held.tab), now)
       }
     }
   }
@@ -892,7 +889,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   ) {
     const sourceState = this.sourceTabStateOf(click.tabId, click.sessionId, click.windowId, click.clickedAtMs)
 
-    await this.emit('link_follow', sourceState, click.tabId, click.sourceUrl, '', now, {
+    await this.emit('link_follow', sourceState, click.tabId, click.sourceUrl, undefined, now, {
       click_id: click.clickId,
       open_mode: openMode,
       matched_by: matchedBy,
@@ -911,7 +908,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
   private pendingAddressOf(tabId: number): Promise<string | undefined> {
     return chrome.tabs.get(tabId)
-      .then((tab) => tab.pendingUrl ?? (tab.url || undefined))
+      .then(newTabAddressOf)
       .catch(() => undefined)
   }
 
@@ -995,7 +992,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     closeFollow(this.followState, follow.clickId)
 
     const sourceState = this.sourceTabStateOf(follow.sourceTabId, follow.sourceSessionId, follow.sourceWindowId, now)
-    await this.emit('link_follow_end', sourceState, follow.sourceTabId, follow.sourceUrl, '', now, {
+    await this.emit('link_follow_end', sourceState, follow.sourceTabId, follow.sourceUrl, undefined, now, {
       click_id: follow.clickId,
       destination_url: await this.redactDestination(this.destinationAddressOf(follow), follow.claimed),
       shown_at: follow.shownAtMs,
@@ -1049,7 +1046,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     state: TabState,
     tabId: number | undefined,
     url: string,
-    title: string,
+    title: string | undefined,
     timestamp: number,
     extras: Record<string, unknown> = {},
     urlShownAtOverrideMs?: number
@@ -1058,7 +1055,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
 
-    const redaction = await this.redact(url, title)
+    const redaction = await this.redact(url, title ?? '')
 
     const payload: Record<string, unknown> = {
       name: EVENT_NAME,
@@ -1074,7 +1071,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     if (tabId !== undefined) {
       payload.tab_id = tabId
     }
-    if (redaction.title !== undefined) {
+    if (title !== undefined && redaction.title !== undefined) {
       payload.title = redaction.title
     }
     if (redaction.filtered_by_list !== undefined) {
