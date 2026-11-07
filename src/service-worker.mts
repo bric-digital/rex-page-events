@@ -28,6 +28,8 @@ import {
   releaseHeldNewTab,
   resolvePendingClick,
   saveFollowState,
+  sourceShownAtMsOf,
+  unshownHeldNavigationsTo,
   takeExpiredClicks,
   windowCreatedAtMsOf,
 } from './follow-state.mjs'
@@ -46,6 +48,7 @@ import {
   type MatchedBy,
   type OpenMode,
   type PendingClick,
+  type ShownTimes,
   focusedMsAt,
   isFragmentOnlyChange,
   matchHeldNavigation,
@@ -435,7 +438,9 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     if (!(await this.resolveSameTabFollow(tabId, outgoingUrl, newUrl, now))) {
       await this.applyFollowEndRules(tabId, newUrl, now)
-      await this.holdNavigationForLateClick({ tabId, fromUrl: outgoingUrl, toUrl: newUrl, atMs: now })
+      await this.holdNavigationForLateClick({
+        tabId, fromUrl: outgoingUrl, fromShownAtMs: state.currentUrlShownAtMs, toUrl: newUrl, atMs: now,
+      })
     }
 
     // Reset segment state for the new URL.
@@ -613,11 +618,12 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const url = message.url ?? sender.tab.url ?? ''
     const title = message.title ?? sender.tab.title ?? ''
     const state = this.tabState.get(tabId) ?? this.backfillTabState(tabId, sender.tab, timestamp)
+    const pageShownAtMs = sourceShownAtMsOf(this.followState, tabId, url, timestamp) ?? state.currentUrlShownAtMs
 
     state.lastTitle = title
 
-    await this.emit('click', state, tabId, url, title, timestamp, await this.clickExtras(message, url))
-    await this.startPendingFollow(message, sender.tab, state, url, timestamp)
+    await this.emit('click', state, tabId, url, title, timestamp, await this.clickExtras(message, url), pageShownAtMs)
+    await this.startPendingFollow(message, sender.tab, state, url, pageShownAtMs, timestamp)
 
     await this.saveTabState()
   }
@@ -686,6 +692,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     tab: chrome.tabs.Tab,
     sourceState: TabState,
     sourceUrl: string,
+    sourceUrlShownAtMs: number,
     clickedAtMs: number
   ) {
     const opensPages = message.click_type === 'primary' || message.click_type === 'middle'
@@ -701,7 +708,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       windowId: tab.windowId,
       sessionId: sourceState.sessionId,
       sourceUrl,
-      sourceUrlShownAtMs: sourceState.currentUrlShownAtMs,
+      sourceUrlShownAtMs,
       clickedAtMs,
       linkUrl: message.link_url,
       claimed: message.claim !== undefined,
@@ -767,6 +774,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
 
+    if (!(await this.isAllowedPage(navigation.fromUrl))) {
+      return
+    }
+
     holdNavigation(this.followState, navigation)
     this.scheduleExpiry(navigation.atMs)
     await this.storeFollowState()
@@ -779,8 +790,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
 
+    const shown = navigation.toUrl === redirectAddressOf(click) ? {} : shownTimesOf(navigation)
+
     releaseHeldNavigation(this.followState, navigation)
-    await this.resolveFollow(click, 'same_tab', undefined, navigation.tabId, navigation.toUrl, navigation.atMs)
+    await this.resolveFollow(click, 'same_tab', undefined, navigation.tabId, navigation.toUrl, navigation.atMs, shown)
   }
 
   private async resolveNewTabFollow(tab: chrome.tabs.Tab, tabId: number, now: number) {
@@ -822,7 +835,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     matchedBy: MatchedBy | undefined,
     targetTabId: number,
     destinationUrl: string | undefined,
-    now: number
+    now: number,
+    shown: ShownTimes = {}
   ) {
     await this.endFollowsTargeting(click.tabId, 'new_follow', now)
 
@@ -842,6 +856,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       redirectUrl: redirectAddressOf(click),
       openMode,
       destinationUrl: knownDestinationUrl,
+      ...shown,
     })
 
     await this.emitLinkFollow(click, openMode, matchedBy, targetTabId, now)
@@ -885,18 +900,25 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const loadedUrl = tab.url ?? state?.currentUrl
     const unshown = followsTargeting(this.followState, tabId)
       .filter((follow) => follow.shownAtMs === undefined && follow.redirectUrl !== loadedUrl)
+    const unshownHeld = unshownHeldNavigationsTo(this.followState, tabId, loadedUrl)
 
-    if (!this.isEnabled() || unshown.length === 0 || state === undefined) {
+    if (!this.isEnabled() || unshown.length + unshownHeld.length === 0 || state === undefined) {
       return
     }
 
     const now = Date.now()
+    const shown: ShownTimes = {
+      shownAtMs: now,
+      focusAtShownMs: focusedMsAt(state.focusDurationMs, state.lastFocusAtMs, now),
+      firstFocusedAtMs: state.lastFocusAtMs === null ? undefined : now,
+    }
 
     for (const follow of unshown) {
-      follow.shownAtMs = now
-      follow.focusAtShownMs = focusedMsAt(state.focusDurationMs, state.lastFocusAtMs, now)
-      follow.firstFocusedAtMs = state.lastFocusAtMs === null ? undefined : now
-      follow.destinationUrl = loadedUrl
+      Object.assign(follow, shown, { destinationUrl: loadedUrl })
+    }
+
+    for (const held of unshownHeld) {
+      Object.assign(held, shown)
     }
 
     await this.storeFollowState()
@@ -1245,6 +1267,14 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
     this.tabState.set(tabId, state)
     return state
+  }
+}
+
+function shownTimesOf(navigation: HeldNavigation): ShownTimes {
+  return {
+    shownAtMs: navigation.shownAtMs,
+    focusAtShownMs: navigation.focusAtShownMs,
+    firstFocusedAtMs: navigation.firstFocusedAtMs,
   }
 }
 

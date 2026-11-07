@@ -108,6 +108,17 @@ export function releaseHeldNavigation(state: FollowState, released: HeldNavigati
   state.heldNavigations = state.heldNavigations.filter((held) => held !== released)
 }
 
+export function unshownHeldNavigationsTo(state: FollowState, tabId: number, url: string | undefined): HeldNavigation[] {
+  return state.heldNavigations.filter((held) => held.tabId === tabId && held.toUrl === url && held.shownAtMs === undefined)
+}
+
+export function sourceShownAtMsOf(state: FollowState, tabId: number, pageUrl: string, clickedAtMs: number): number | undefined {
+  return state.heldNavigations
+    .filter((held) => held.tabId === tabId && held.fromUrl === pageUrl && held.atMs >= clickedAtMs)
+    .reduce<HeldNavigation | undefined>((earliest, held) => (earliest === undefined || held.atMs < earliest.atMs ? held : earliest), undefined)
+    ?.fromShownAtMs
+}
+
 export function dropExpiredHeldNavigations(state: FollowState, nowMs: number, windowMs: number): void {
   state.heldNavigations = state.heldNavigations.filter((held) => nowMs - held.atMs <= windowMs)
 }

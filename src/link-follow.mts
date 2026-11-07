@@ -29,9 +29,16 @@ export interface NewTabDescription {
   url?: string
 }
 
-export interface HeldNavigation {
+export interface ShownTimes {
+  shownAtMs?: number
+  focusAtShownMs?: number
+  firstFocusedAtMs?: number
+}
+
+export interface HeldNavigation extends ShownTimes {
   tabId: number
   fromUrl: string
+  fromShownAtMs: number
   toUrl: string
   atMs: number
 }

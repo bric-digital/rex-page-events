@@ -688,19 +688,31 @@ function lateClickMessage(clickId, sourceUrl, timestamp) {
   }
 }
 
-function deliverInOrder(serviceWorker, deliveries) {
-  return serviceWorker.evaluate((steps) => {
+function deliverInOrder(serviceWorker, deliveries, baseMs = undefined) {
+  return serviceWorker.evaluate(({ steps, givenBaseMs }) => {
     const plugin = self.rexPageEventsPlugin
-    const navigatedAtMs = Date.now()
+    const navigatedAtMs = givenBaseMs ?? Date.now()
 
     for (const step of steps) {
       if (step.kind === 'navigation') {
         plugin.enqueue(() => plugin.onTabUrlChanged(step.tab.id, step.toUrl, { ...step.tab, url: step.toUrl }))
+      } else if (step.kind === 'complete') {
+        plugin.enqueue(() => plugin.onTabComplete(step.tab.id, { ...step.tab, url: step.url, status: 'complete' }))
       } else {
         plugin.enqueue(() => plugin.recordClick({ ...step.message, timestamp: navigatedAtMs + step.offsetMs }, { tab: step.tab }))
       }
     }
-  }, deliveries)
+
+    return navigatedAtMs
+  }, { steps: deliveries, givenBaseMs: baseMs })
+}
+
+function completion(tab, url = DESTINATION_URL) {
+  return { kind: 'complete', tab, url }
+}
+
+function heldNavigationsIn(serviceWorker) {
+  return serviceWorker.evaluate(() => self.rexPageEventsPlugin.followState.heldNavigations)
 }
 
 function navigation(tab, toUrl = DESTINATION_URL) {
@@ -750,6 +762,66 @@ test.describe('a same-tab navigation that arrives before its click', () => {
     expect(follows).toHaveLength(2)
     expect(modeOf('first-late-click')).toBe('same_tab')
     expect(modeOf('second-late-click')).toBe('none')
+  })
+
+  test('a destination loaded before the late click counts as shown from its load', async ({ context, serviceWorker }) => {
+    const { page, url, tab } = await openLoadedSource(context, serviceWorker)
+    await page.bringToFront()
+
+    const beforeCompletionMs = Date.now()
+    const navigatedAtMs = await deliverInOrder(serviceWorker, [navigation(tab), completion(tab)])
+    const afterCompletionMs = Date.now() + LATE_CLICK_GAP_MS
+    await page.waitForTimeout(LATE_CLICK_GAP_MS * 3)
+
+    await deliverInOrder(serviceWorker, [lateClick(tab, 'late-click', url)], navigatedAtMs)
+    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await page.waitForTimeout(DWELL_MS)
+    await deliverInOrder(serviceWorker, [navigation({ ...tab, url: DESTINATION_URL }, url)])
+
+    await expect.poll(async () => (await endsOf(serviceWorker)).length).toBe(1)
+
+    const [end] = await endsOf(serviceWorker)
+
+    expect(end).toMatchObject({ click_id: 'late-click', end_reason: 'back', before_load: false })
+    expect(end.shown_at).toBeGreaterThanOrEqual(beforeCompletionMs)
+    expect(end.shown_at).toBeLessThanOrEqual(afterCompletionMs)
+    expect(end.total_focus_duration_ms).toBeGreaterThan(DWELL_MS)
+  })
+
+  test('the late click and its link_follow carry the source page\'s url_shown_at', async ({ context, serviceWorker }) => {
+    const { page, url, tab } = await openLoadedSource(context, serviceWorker)
+
+    await deliverInOrder(serviceWorker, [navigation(tab), lateClick(tab, 'late-click', url)])
+    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+    await page.waitForTimeout(SETTLE_MS)
+
+    const leavingSource = (await eventsOf(serviceWorker, 'tab_url_change')).find((event) => event.tab_id === tab.id && event.url === url)
+    const [click] = (await clicksOf(serviceWorker)).filter((event) => event.click_id === 'late-click')
+    const [follow] = await followsOf(serviceWorker)
+
+    expect(leavingSource).toBeDefined()
+    expect(click.url_shown_at).toBe(leavingSource.url_shown_at)
+    expect(click.url_shown_at).toBeLessThanOrEqual(click.timestamp)
+    expect(follow.url_shown_at).toBe(leavingSource.url_shown_at)
+  })
+
+  test('a navigation away from a page that is not allowed is not held', async ({ context, serviceWorker }) => {
+    await startWithAllowList(serviceWorker)
+
+    const { url } = await openSource(context, '')
+    const load = await sourceTabOf(serviceWorker, url)
+    const allowedTab = { id: load.tab_id, windowId: load.window_id, url, title: 'Source', active: true }
+    const outsideTab = { ...allowedTab, url: `${OUTSIDE_ORIGIN}/page` }
+
+    await deliverInOrder(serviceWorker, [navigation(allowedTab, outsideTab.url)])
+    await expect.poll(async () => (await heldNavigationsIn(serviceWorker)).length).toBe(1)
+
+    await deliverInOrder(serviceWorker, [navigation(outsideTab, `${OUTSIDE_ORIGIN}/next`)])
+    await serviceWorker.evaluate(() => self.rexPageEventsPlugin.handlerQueue)
+
+    const held = await heldNavigationsIn(serviceWorker)
+
+    expect(held.map((navigation) => navigation.fromUrl)).toEqual([url])
   })
 
   test('control: a click made after the navigation does not match it', async ({ context, serviceWorker }) => {
