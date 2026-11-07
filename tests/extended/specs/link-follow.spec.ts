@@ -658,3 +658,141 @@ test.describe('link_follow_end for a destination with no content script (data: U
     expect(typeof end.shown_at).toBe('number')
   })
 })
+
+const LATE_CLICK_GAP_MS = 200
+const BUSY_AFTER_NAVIGATION_MS = 300
+const CLAIMED_BUSY_CROSS_SITE_LINK =
+  `<div class="claimable"><a id="link" href="${OUTSIDE_ORIGIN}/destination" onclick="event.preventDefault(); location.href = this.href; const end = Date.now() + ${BUSY_AFTER_NAVIGATION_MS}; while (Date.now() < end) {}">Result title</a></div>`
+
+async function sourceTabOf(serviceWorker, url) {
+  await expect.poll(async () => (await eventsOf(serviceWorker, 'load')).filter((event) => event.url === url).length).toBeGreaterThanOrEqual(1)
+
+  return (await eventsOf(serviceWorker, 'load')).find((event) => event.url === url)
+}
+
+function lateClickMessage(clickId, sourceUrl, timestamp) {
+  return {
+    messageType: 'pageClick',
+    click_id: clickId,
+    url: sourceUrl,
+    title: 'Source',
+    timestamp,
+    click_type: 'primary',
+    button: 0,
+    modifier_keys: [],
+    click_count: 1,
+    on_link: true,
+    link_url: DESTINATION_URL,
+    link_text: 'Result title',
+    claim: {},
+  }
+}
+
+function deliverInOrder(serviceWorker, deliveries) {
+  return serviceWorker.evaluate((steps) => {
+    const plugin = self.rexPageEventsPlugin
+    const navigatedAtMs = Date.now()
+
+    for (const step of steps) {
+      if (step.kind === 'navigation') {
+        plugin.enqueue(() => plugin.onTabUrlChanged(step.tab.id, step.toUrl, { ...step.tab, url: step.toUrl }))
+      } else {
+        plugin.enqueue(() => plugin.recordClick({ ...step.message, timestamp: navigatedAtMs + step.offsetMs }, { tab: step.tab }))
+      }
+    }
+  }, deliveries)
+}
+
+function navigation(tab, toUrl = DESTINATION_URL) {
+  return { kind: 'navigation', tab, toUrl }
+}
+
+function lateClick(tab, clickId, sourceUrl, offsetMs = -LATE_CLICK_GAP_MS) {
+  return { kind: 'click', tab, offsetMs, message: lateClickMessage(clickId, sourceUrl, 0) }
+}
+
+test.describe('a same-tab navigation that arrives before its click', () => {
+  async function openLoadedSource(context, serviceWorker) {
+    await startModule(serviceWorker, { ...FOLLOWING_ON, link_follow_match_window: SHORT_WINDOW_MS })
+
+    const { page, url } = await openSource(context, '')
+    const load = await sourceTabOf(serviceWorker, url)
+    const tab = { id: load.tab_id, windowId: load.window_id, url, title: 'Source', active: true }
+
+    return { page, url, tab }
+  }
+
+  test('matches by the click\'s time', async ({ context, serviceWorker }) => {
+    const { page, url, tab } = await openLoadedSource(context, serviceWorker)
+
+    await deliverInOrder(serviceWorker, [navigation(tab), lateClick(tab, 'late-click', url)])
+    await page.waitForTimeout(PAST_SHORT_WINDOW_MS)
+
+    const follows = await followsOf(serviceWorker)
+
+    expect(follows).toHaveLength(1)
+    expect(follows[0]).toMatchObject({ click_id: 'late-click', open_mode: 'same_tab', target_tab_id: tab.id, is_result: true })
+  })
+
+  test('is matched once: a second late click does not take the same navigation', async ({ context, serviceWorker }) => {
+    const { page, url, tab } = await openLoadedSource(context, serviceWorker)
+
+    await deliverInOrder(serviceWorker, [
+      navigation(tab),
+      lateClick(tab, 'first-late-click', url),
+      lateClick(tab, 'second-late-click', url, -LATE_CLICK_GAP_MS * 2),
+    ])
+    await page.waitForTimeout(PAST_SHORT_WINDOW_MS)
+
+    const follows = await followsOf(serviceWorker)
+    const modeOf = (clickId) => follows.find((follow) => follow.click_id === clickId)?.open_mode
+
+    expect(follows).toHaveLength(2)
+    expect(modeOf('first-late-click')).toBe('same_tab')
+    expect(modeOf('second-late-click')).toBe('none')
+  })
+
+  test('control: a click made after the navigation does not match it', async ({ context, serviceWorker }) => {
+    const { page, url, tab } = await openLoadedSource(context, serviceWorker)
+
+    await deliverInOrder(serviceWorker, [navigation(tab), lateClick(tab, 'click-after', url, LATE_CLICK_GAP_MS)])
+    await page.waitForTimeout(PAST_SHORT_WINDOW_MS)
+
+    const follows = await followsOf(serviceWorker)
+
+    expect(follows).toHaveLength(1)
+    expect(follows[0]).toMatchObject({ click_id: 'click-after', open_mode: 'none' })
+  })
+
+  test('control: a navigation away from another page does not match', async ({ context, serviceWorker }) => {
+    const { page, tab } = await openLoadedSource(context, serviceWorker)
+
+    await deliverInOrder(serviceWorker, [navigation(tab), lateClick(tab, 'click-elsewhere', `${TEST_ORIGIN}/not-the-source`)])
+    await page.waitForTimeout(PAST_SHORT_WINDOW_MS)
+
+    const follows = await followsOf(serviceWorker)
+
+    expect(follows).toHaveLength(1)
+    expect(follows[0]).toMatchObject({ click_id: 'click-elsewhere', open_mode: 'none' })
+  })
+
+  test('a real page whose navigation commits before its click is sent records same_tab', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openSource(context, CLAIMED_BUSY_CROSS_SITE_LINK)
+    const load = await sourceTabOf(serviceWorker, url)
+
+    await Promise.all([page.waitForURL(`${OUTSIDE_ORIGIN}/destination`), page.click('#link', { noWaitAfter: true })])
+    await expect.poll(async () => (await followsOf(serviceWorker)).length, { timeout: 8000 }).toBe(1)
+
+    const records = await serviceWorker.evaluate(() => self.__capturedEvents)
+    const leftSource = records.findIndex((event) => event.event_type === 'tab_url_change' && event.tab_id === load.tab_id && event.url === url)
+    const clickRecord = records.findIndex((event) => event.event_type === 'click' && event.tab_id === load.tab_id)
+    const [click] = await clicksOf(serviceWorker)
+    const [follow] = await followsOf(serviceWorker)
+
+    expect(leftSource).toBeGreaterThanOrEqual(0)
+    expect(clickRecord).toBeGreaterThan(leftSource)
+    expect(follow).toMatchObject({ click_id: click.click_id, open_mode: 'same_tab', target_tab_id: load.tab_id, is_result: true })
+  })
+})

@@ -12,14 +12,19 @@ import {
   type OpenFollow,
   addPendingClick,
   closeFollow,
+  dropExpiredHeldNavigations,
   dropExpiredHeldNewTabs,
   dropExpiredWindowCreations,
   emptyFollowState,
+  expiryStartsOf,
   followsTargeting,
+  holdNavigation,
   holdNewTab,
+  loadFollowState,
   matchWindowMsOf,
   noteWindowCreated,
   openFollow,
+  releaseHeldNavigation,
   releaseHeldNewTab,
   resolvePendingClick,
   saveFollowState,
@@ -37,10 +42,13 @@ import {
 } from './hidden-link-mode.mjs'
 import {
   type EndReason,
+  type HeldNavigation,
   type MatchedBy,
   type OpenMode,
   type PendingClick,
   focusedMsAt,
+  isFragmentOnlyChange,
+  matchHeldNavigation,
   matchNewTab,
   matchSameTab,
   redirectAddressOf,
@@ -186,8 +194,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   setup() {
     this.refreshConfiguration()
 
-    this.handlerQueue = Promise.all([this.loadSavedTabState(), this.loadStoredConfiguration()])
-      .then(() => undefined)
+    this.handlerQueue = Promise.all([this.loadSavedTabState(), this.loadSavedFollowState(), this.loadStoredConfiguration()])
+      .then(() => {
+        this.rearmFollowExpiry()
+      })
     this.registerChromeListeners()
   }
 
@@ -425,6 +435,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     if (!(await this.resolveSameTabFollow(tabId, outgoingUrl, newUrl, now))) {
       await this.applyFollowEndRules(tabId, newUrl, now)
+      await this.holdNavigationForLateClick({ tabId, fromUrl: outgoingUrl, toUrl: newUrl, atMs: now })
     }
 
     // Reset segment state for the new URL.
@@ -684,7 +695,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
 
-    addPendingClick(this.followState, {
+    const click: PendingClick = {
       clickId: message.click_id,
       tabId: tab.id,
       windowId: tab.windowId,
@@ -696,9 +707,12 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       claimed: message.claim !== undefined,
       claimDestinationUrl: message.claim?.destination_url,
       shiftHeld: message.modifier_keys.includes('shift'),
-    })
+    }
+
+    addPendingClick(this.followState, click)
     this.scheduleExpiry(clickedAtMs)
 
+    await this.resolveHeldNavigation(click)
     await this.resolveHeldNewTabs(Date.now())
     await this.storeFollowState()
   }
@@ -715,11 +729,18 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }, delayMs)
   }
 
+  private rearmFollowExpiry() {
+    for (const startedAtMs of expiryStartsOf(this.followState)) {
+      this.scheduleExpiry(startedAtMs)
+    }
+  }
+
   private async expirePendingClicks() {
     const now = Date.now()
     const expired = takeExpiredClicks(this.followState, now, this.matchWindowMs())
 
     dropExpiredHeldNewTabs(this.followState, now, this.matchWindowMs())
+    dropExpiredHeldNavigations(this.followState, now, this.matchWindowMs())
     dropExpiredWindowCreations(this.followState, now, this.matchWindowMs())
 
     for (const click of expired.filter((candidate) => candidate.claimed)) {
@@ -739,6 +760,27 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     await this.resolveFollow(click, 'same_tab', undefined, tabId, toUrl, now)
 
     return true
+  }
+
+  private async holdNavigationForLateClick(navigation: HeldNavigation) {
+    if (!this.isEventTypeOn('link_follow') || isFragmentOnlyChange(navigation.fromUrl, navigation.toUrl)) {
+      return
+    }
+
+    holdNavigation(this.followState, navigation)
+    this.scheduleExpiry(navigation.atMs)
+    await this.storeFollowState()
+  }
+
+  private async resolveHeldNavigation(click: PendingClick) {
+    const navigation = matchHeldNavigation(this.followState.heldNavigations, click, this.matchWindowMs())
+
+    if (navigation === null) {
+      return
+    }
+
+    releaseHeldNavigation(this.followState, navigation)
+    await this.resolveFollow(click, 'same_tab', undefined, navigation.tabId, navigation.toUrl, navigation.atMs)
   }
 
   private async resolveNewTabFollow(tab: chrome.tabs.Tab, tabId: number, now: number) {
@@ -930,7 +972,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return 0
     }
 
-    return focusedMsAt(state.focusDurationMs, state.lastFocusAtMs, now) - follow.focusAtShownMs
+    return Math.max(0, focusedMsAt(state.focusDurationMs, state.lastFocusAtMs, now) - follow.focusAtShownMs)
   }
 
   private destinationAddressOf(follow: OpenFollow): string {
@@ -1174,6 +1216,16 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       })
       .catch((error: unknown) => {
         console.debug(`${LOG_PREFIX} could not load saved tab state`, error)
+      })
+  }
+
+  private loadSavedFollowState(): Promise<void> {
+    return loadFollowState()
+      .then((state) => {
+        this.followState = state
+      })
+      .catch((error: unknown) => {
+        console.debug(`${LOG_PREFIX} could not load saved follow state`, error)
       })
   }
 

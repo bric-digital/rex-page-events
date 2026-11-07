@@ -1,4 +1,4 @@
-import { type NewTabDescription, type OpenMode, type PendingClick } from './link-follow.mjs'
+import { type HeldNavigation, type NewTabDescription, type OpenMode, type PendingClick } from './link-follow.mjs'
 
 export const FOLLOW_STATE_STORAGE_KEY = 'rexPageEventsFollowState'
 export const DEFAULT_LINK_FOLLOW_MATCH_WINDOW_MS = 5000
@@ -31,11 +31,39 @@ export interface FollowState {
   pending: PendingClick[]
   open: Map<string, OpenFollow>
   heldNewTabs: HeldNewTab[]
+  heldNavigations: HeldNavigation[]
   windowCreations: Map<number, number>
 }
 
+interface SavedFollowState {
+  pending?: PendingClick[]
+  open?: [string, OpenFollow][]
+  heldNewTabs?: HeldNewTab[]
+  heldNavigations?: HeldNavigation[]
+  windowCreations?: [number, number][]
+}
+
 export function emptyFollowState(): FollowState {
-  return { pending: [], open: new Map(), heldNewTabs: [], windowCreations: new Map() }
+  return { pending: [], open: new Map(), heldNewTabs: [], heldNavigations: [], windowCreations: new Map() }
+}
+
+export function followStateFrom(saved: SavedFollowState | undefined): FollowState {
+  return {
+    pending: saved?.pending ?? [],
+    open: new Map(saved?.open ?? []),
+    heldNewTabs: saved?.heldNewTabs ?? [],
+    heldNavigations: saved?.heldNavigations ?? [],
+    windowCreations: new Map(saved?.windowCreations ?? []),
+  }
+}
+
+export function expiryStartsOf(state: FollowState): number[] {
+  return [
+    ...state.pending.map((click) => click.clickedAtMs),
+    ...state.heldNewTabs.map((held) => held.createdAtMs),
+    ...state.heldNavigations.map((held) => held.atMs),
+    ...state.windowCreations.values(),
+  ]
 }
 
 export function matchWindowMsOf(configured: unknown): number {
@@ -70,6 +98,18 @@ export function releaseHeldNewTab(state: FollowState, tabId: number): void {
 
 export function dropExpiredHeldNewTabs(state: FollowState, nowMs: number, windowMs: number): void {
   state.heldNewTabs = state.heldNewTabs.filter((held) => nowMs - held.createdAtMs <= windowMs)
+}
+
+export function holdNavigation(state: FollowState, held: HeldNavigation): void {
+  state.heldNavigations.push(held)
+}
+
+export function releaseHeldNavigation(state: FollowState, released: HeldNavigation): void {
+  state.heldNavigations = state.heldNavigations.filter((held) => held !== released)
+}
+
+export function dropExpiredHeldNavigations(state: FollowState, nowMs: number, windowMs: number): void {
+  state.heldNavigations = state.heldNavigations.filter((held) => nowMs - held.atMs <= windowMs)
 }
 
 export function noteWindowCreated(state: FollowState, windowId: number, createdAtMs: number): void {
@@ -116,7 +156,13 @@ export function saveFollowState(state: FollowState): Promise<void> {
       pending: state.pending,
       open: Array.from(state.open.entries()),
       heldNewTabs: state.heldNewTabs,
+      heldNavigations: state.heldNavigations,
       windowCreations: Array.from(state.windowCreations.entries()),
     },
   })
+}
+
+export function loadFollowState(): Promise<FollowState> {
+  return chrome.storage.session.get(FOLLOW_STATE_STORAGE_KEY)
+    .then((saved) => followStateFrom(saved[FOLLOW_STATE_STORAGE_KEY] as SavedFollowState | undefined))
 }

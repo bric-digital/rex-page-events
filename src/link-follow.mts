@@ -29,6 +29,13 @@ export interface NewTabDescription {
   url?: string
 }
 
+export interface HeldNavigation {
+  tabId: number
+  fromUrl: string
+  toUrl: string
+  atMs: number
+}
+
 export interface NewTabMatch {
   click: PendingClick
   openMode: OpenMode
@@ -102,6 +109,20 @@ export function matchSameTab(
   }
 
   return latestOf(pending.filter((click) => click.tabId === tabId && isWithinWindow(click.clickedAtMs, atMs, windowMs)))
+}
+
+function earliestOf(navigations: HeldNavigation[]): HeldNavigation | null {
+  return navigations.reduce<HeldNavigation | null>(
+    (earliest, candidate) => (earliest === null || candidate.atMs < earliest.atMs ? candidate : earliest),
+    null,
+  )
+}
+
+export function matchHeldNavigation(held: HeldNavigation[], click: PendingClick, windowMs: number): HeldNavigation | null {
+  return earliestOf(held.filter((navigation) =>
+    navigation.fromUrl === click.sourceUrl &&
+    matchSameTab([click], navigation.tabId, navigation.fromUrl, navigation.toUrl, navigation.atMs, windowMs) !== null,
+  ))
 }
 
 function matchByOpener(

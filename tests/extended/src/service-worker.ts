@@ -10,6 +10,7 @@ import rexPageEventsPlugin, {
 } from '@bric/rex-page-events/service-worker'
 import { createListEntry } from '@bric/rex-lists'
 import * as linkFollow from '../../../src/link-follow.mjs'
+import * as followStateRules from '../../../src/follow-state.mjs'
 
 self['__capturedEvents'] = []
 self['__capturedUrlActive'] = []
@@ -35,5 +36,6 @@ self['rexCorePlugin'] = rexCorePlugin
 self['rexPageEventsPlugin'] = rexPageEventsPlugin
 self['createListEntry'] = createListEntry
 self['linkFollow'] = linkFollow
+self['followStateRules'] = followStateRules
 
 rexCorePlugin.setup()
