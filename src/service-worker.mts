@@ -680,12 +680,12 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return { link_text: message.link_text }
     }
 
-    const claimed = claimsRevealingOrigin(message.claim !== undefined, address, pageUrl)
+    const mayRevealOrigin = claimsRevealingOrigin(message.claim !== undefined, address, pageUrl)
     const redaction = await this.redact(address, '')
     const mode = this.hiddenLinkMode()
-    const filterLookup = await this.filterLookupFor(mode, claimed, redaction, address)
+    const filterLookup = await this.filterLookupFor(mode, mayRevealOrigin, redaction, address)
 
-    return clickLinkFieldsFor(mode, claimed, redaction, address, message.link_text, filterLookup)
+    return clickLinkFieldsFor(mode, mayRevealOrigin, redaction, address, message.link_text, filterLookup)
   }
 
   private hiddenLinkMode(): HiddenLinkMode {

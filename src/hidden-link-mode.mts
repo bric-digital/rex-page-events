@@ -38,14 +38,14 @@ export function originOf(address: string): string | undefined {
   }
 }
 
-export function isOnSameSite(address: string, pageAddress: string): boolean {
+export function isOnSameOrigin(address: string, pageAddress: string): boolean {
   const origin = originOf(address)
 
   return origin !== undefined && origin === originOf(pageAddress)
 }
 
 export function claimsRevealingOrigin(claimed: boolean, address: string, pageAddress: string): boolean {
-  return claimed && !isOnSameSite(address, pageAddress)
+  return claimed && !isOnSameOrigin(address, pageAddress)
 }
 
 export function revealsOrigin(mode: HiddenLinkMode, claimed: boolean, redaction: LinkRedaction): boolean {
