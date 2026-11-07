@@ -13,6 +13,10 @@ function claimableTarget(event) {
 }
 
 function claimFor(target) {
+  if (target.closest('.claimable').hasAttribute('data-claim-without-destination')) {
+    return {}
+  }
+
   return { destination_url: target.closest('.claimable').getAttribute('data-claim-destination') ?? CLAIMED_DESTINATION }
 }
 

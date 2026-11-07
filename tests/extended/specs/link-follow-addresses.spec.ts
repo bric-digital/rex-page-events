@@ -31,6 +31,10 @@ function claimedLink(destination, { href = destination, target = '' } = {}) {
   return `<div class="claimable" data-claim-destination="${destination}"><a id="link" href="${href}"${target}>${LINK_TEXT}</a></div>`
 }
 
+function claimedLinkWithoutDestination(href, target = '') {
+  return `<div class="claimable" data-claim-without-destination><a id="link" href="${href}"${target}>${LINK_TEXT}</a></div>`
+}
+
 function claimedRedirectLink(destination, target = '') {
   return claimedLink(destination, { href: redirectLinkTo(destination), target })
 }
@@ -69,8 +73,19 @@ async function breakFilterListLookup(serviceWorker, listName) {
   }, listName)
 }
 
-async function startModule(serviceWorker, { linkFollow = true, hiddenLinkMode, extraFilterLists = [] } = {}) {
-  await addListEntry(serviceWorker, 'address-allow', 'pages.test', 'ALLOWED')
+async function allowPagesByPathPrefix(serviceWorker) {
+  await serviceWorker.evaluate(async () => {
+    await self.createListEntry({ list_name: 'address-allow', pattern: 'pages.test/source-', pattern_type: 'host_path_prefix', source: 'backend', metadata: { category: 'ALLOWED' } })
+  })
+}
+
+async function startModule(serviceWorker, { linkFollow = true, hiddenLinkMode, extraFilterLists = [], onlySourcePagesAllowed = false } = {}) {
+  if (onlySourcePagesAllowed) {
+    await allowPagesByPathPrefix(serviceWorker)
+  } else {
+    await addListEntry(serviceWorker, 'address-allow', 'pages.test', 'ALLOWED')
+  }
+
   await addListEntry(serviceWorker, 'address-allow', 'kept.test', 'ALLOWED')
   await addListEntry(serviceWorker, 'address-filter', 'filtered.test', 'TEST_FILTERED')
   await addListEntry(serviceWorker, 'address-allow', 'allowed-filtered.test', 'ALLOWED')
@@ -295,6 +310,28 @@ test.describe('addresses that must stay hidden under show', () => {
     const click = await clickOnly(page, serviceWorker)
 
     expect(click.link_url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
+  })
+})
+
+test.describe('a claimed link on the page\'s own site, with no destination in the claim', () => {
+  test('keeps its address hidden under show', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { onlySourcePagesAllowed: true })
+
+    const { page } = await openSource(context, claimedLinkWithoutDestination(redirectLinkTo(RESULT_DESTINATION), ' target="_blank"'))
+    const click = await clickOnly(page, serviceWorker)
+
+    expect(click.claimed).toBe(true)
+    expect(click.link_url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
+    expect(click.link_text).toBe(LINK_TEXT)
+  })
+
+  test('control: a claimed link on another site keeps its origin under show', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { onlySourcePagesAllowed: true })
+
+    const { page } = await openSource(context, claimedLinkWithoutDestination('https://other.test/page', ' target="_blank"'))
+    const click = await clickOnly(page, serviceWorker)
+
+    expect(click.link_url).toBe('https://other.test')
   })
 })
 
