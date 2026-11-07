@@ -305,6 +305,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     noteWindowCreated(this.followState, window.id, now)
     this.scheduleExpiry(now)
+    await this.resolveHeldNewTabs(now)
     await this.storeFollowState()
   }
 

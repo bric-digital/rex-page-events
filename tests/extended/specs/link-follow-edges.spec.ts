@@ -92,6 +92,34 @@ test.describe('a new window with no opener', () => {
     })
   })
 
+  test('matches when the tab event arrives before the window event', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page } = await openTestPage(context, STOPPED_LINK)
+    await page.click('#link', { modifiers: ['Shift'] })
+    await expect.poll(async () => (await clicksOf(serviceWorker)).length).toBe(1)
+
+    await serviceWorker.evaluate((address) => {
+      const plugin = self.rexPageEventsPlugin
+      const tab = { id: 987001, windowId: 987002, index: 0, active: true, pendingUrl: address, url: '' }
+
+      plugin.enqueue(() => plugin.onTabCreated(tab))
+      plugin.enqueue(() => plugin.onWindowCreated({ id: 987002 }))
+    }, DESTINATION_URL)
+
+    await expect.poll(async () => (await followsOf(serviceWorker)).length).toBe(1)
+
+    const [click] = await clicksOf(serviceWorker)
+    const [follow] = await followsOf(serviceWorker)
+
+    expect(follow).toMatchObject({
+      click_id: click.click_id,
+      open_mode: 'new_window',
+      matched_by: 'address_and_time',
+      target_tab_id: 987001,
+    })
+  })
+
   test('control: a window at another address does not match', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker, { ...FOLLOWING_ON, link_follow_match_window: SHORT_WINDOW_MS })
 
