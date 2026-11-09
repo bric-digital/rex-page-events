@@ -148,3 +148,6 @@ tests/extended/extension/js/
 tests/extended/build/
 
 .DS_Store
+
+# Claude Code per-user settings can hold credentials
+.claude/settings.local.json
