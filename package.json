@@ -38,7 +38,7 @@
         "@bric/rex-types": "github:bric-digital/rex-types"
     },
     "devDependencies": {
-        "@playwright/test": "1.64.1",
+        "@playwright/test": "1.65.0",
         "express": "^5.3.0"
     }
 }
