@@ -440,7 +440,7 @@ test.describe('link_follow_end records', () => {
     const [click] = await clicksOf(serviceWorker)
     const [follow] = await followsOf(serviceWorker)
     const fragmentChange = (await eventsOf(serviceWorker, 'tab_url_change'))
-      .find((event) => event.tab_id === click.tab_id && event.timestamp > click.timestamp)
+      .find((event) => event.tab_id === click.tab_id && event.date > click.date)
 
     expect(fragmentChange).toBeDefined()
     expect(follow.open_mode).toBe('none')
@@ -840,7 +840,7 @@ test.describe('a same-tab navigation that arrives before its click', () => {
 
     expect(leavingSource).toBeDefined()
     expect(click.url_shown_at).toBe(leavingSource.url_shown_at)
-    expect(click.url_shown_at).toBeLessThanOrEqual(click.timestamp)
+    expect(click.url_shown_at).toBeLessThanOrEqual(click.date)
     expect(follow.url_shown_at).toBe(leavingSource.url_shown_at)
   })
 

@@ -111,8 +111,7 @@ interface TabState {
   currentUrlShownAtMs: number
   currentUrlFocusMs: number
   lastTitle: string
-  // URL that preceded currentUrl in this tab, if any. Populated on tab_url_change
-  // so the next tab_url_change can emit it as `previous_url` (two hops of history).
+  // URL that preceded currentUrl in this tab, if any; emitted as `previous_url`.
   priorUrl: string | null
 }
 
@@ -156,12 +155,8 @@ function extractHostname(url: string): string {
   }
 }
 
-// TODO: generate session IDs one standard way (rex-page-events #28)
 function makeSessionId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  return crypto.randomUUID()
 }
 
 function isOnTheWayToDestination(follow: OpenFollow, url: string): boolean {
@@ -251,7 +246,9 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     if (pageEventsConfig !== undefined) {
       this.config = pageEventsConfig
-      console.log(`${LOG_PREFIX} config loaded`, pageEventsConfig)
+      if (pageEventsConfig.debug === true) {
+        console.log(`${LOG_PREFIX} config loaded`, pageEventsConfig)
+      }
     }
   }
 
@@ -378,9 +375,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
     this.tabState.set(tab.id, state)
 
-    // If this tab was opened from another tab (middle-click, target=_blank,
-    // window.open, etc.), Chrome sets openerTabId. Surface the opener's current
-    // URL so downstream can reconstruct cross-tab referral chains. Redacted
+    // When Chrome reports an opener tab, add the opener's current URL, redacted
     // with the same rules as `url`.
     const extras: Record<string, unknown> = {}
     if (tab.openerTabId !== undefined) {
@@ -394,9 +389,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
 
     await this.emit('tab_open', state, tab.id, url, title, now, extras)
-    // After emitting tab_open, announce the URL-active record so sibling modules
-    // (e.g. rex-history) can link. Raw URL on purpose — redaction happens only on
-    // the outbound event bus.
+    // Announces the URL-active record, with the raw URL, to in-process subscribers.
     this.deliverUrlActive(state, tab.id, url, now)
 
     await this.resolveNewTabFollow(tab, tab.id, now)
@@ -1065,7 +1058,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       window_id: state.windowId,
       url: redaction.url,
       url_shown_at: urlShownAtOverrideMs ?? state.currentUrlShownAtMs,
-      timestamp,
       date: timestamp,
       filtered: redaction.filtered,
     }
@@ -1114,8 +1106,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       }
     }
 
-    // In debug mode, also publish to the event bus so PDK/local-download can log it.
     if (this.config?.debug === true) {
+      // Casts the URL-active record to the event shape dispatchEvent accepts.
       dispatchEvent(record as unknown as { name: string } & Record<string, unknown>)
     }
   }

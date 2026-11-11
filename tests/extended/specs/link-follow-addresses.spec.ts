@@ -283,7 +283,7 @@ test.describe('a redirect page that loads before the destination', () => {
     const { end } = await clickAndEnd(serviceWorker)
     const leftRedirectAt = Math.max(...(await eventsOf(serviceWorker, 'tab_url_change'))
       .filter((change) => change.url.includes('/redirect?'))
-      .map((change) => change.timestamp))
+      .map((change) => change.date))
 
     expect(end.end_reason).toBe('allow_listed_page')
     expect(end.destination_url).toBe(RESULT_ORIGIN)

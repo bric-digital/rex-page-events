@@ -46,7 +46,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `window_id` | Same listeners / `sender.tab.windowId` |
 | `url` | For service-worker events: the `chrome.tabs.Tab` handed to the listener. For content-script events (`page_show`, `page_hide`, `load`, `scroll`, `click`): `location.href` captured in the page context. May be replaced by a redaction token — see **Redaction** below. |
 | `title` | Same two sources as `url` (`tab.title` in the service worker, `document.title` in the page). Omitted entirely when the URL is redacted by an allow- or filter-list; `"DOMAIN ONLY"` when it is redacted by a domain-only list. |
-| `timestamp`, `date` | `Date.now()`, captured once per event and assigned to both fields (PDK expects `date`; we also surface it under `timestamp` for clarity). For `load`, the time `load` began (`performance.timeOrigin + loadEventStart`) |
+| `date` | `Date.now()`, captured once per event. For `load`, the time `load` began (`performance.timeOrigin + loadEventStart`) |
 | `filtered` | `true` iff any list matched or the URL failed an allow-list check — see **Redaction** |
 | `filtered_by_list` | Present only when `filtered: true`: the list name that caused the redaction (or `"NOT_ON_ALLOWLIST"` for allow-list rejections) |
 | `allowed_by_list` | Present only when `allow_lists` is configured and the URL matched one: the allow-list name |
@@ -67,7 +67,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 
 ### Example records
 
-**`tab_open`** — a new tab appears. `url_shown_at` equals `timestamp` because the URL just became active. When Chrome reports an opener tab (e.g. middle-click on a link), `opener_tab_id` / `opener_url` / `opener_filtered` are included — see **Cross-tab referral linkage** below:
+**`tab_open`** — a new tab appears. `url_shown_at` equals `date` because the URL just became active. When Chrome reports an opener tab (e.g. middle-click on a link), `opener_tab_id` / `opener_url` / `opener_filtered` are included — see **Cross-tab referral linkage** below:
 
 ```json
 {
@@ -82,7 +82,6 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
   "opener_tab_id": 8472,
   "opener_url": "https://news.ycombinator.com/",
   "opener_filtered": false,
-  "timestamp": 1745172500000,
   "date": 1745172500000,
   "filtered": false
 }
@@ -100,7 +99,6 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
   "url": "https://www.cnbc.com/2026/04/18/fed-rate-decision-markets.html",
   "title": "Fed holds rates steady as markets wobble",
   "url_shown_at": 1745172463812,
-  "timestamp": 1745172471002,
   "date": 1745172471002,
   "filtered": false
 }
@@ -122,7 +120,6 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
   "url_dwell_ms": 87414,
   "previous_url": "https://www.cnbc.com/markets",
   "previous_url_filtered": false,
-  "timestamp": 1745172551226,
   "date": 1745172551226,
   "filtered": false
 }
@@ -140,7 +137,6 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
   "url": "https://www.cnbc.com/2026/04/18/fed-rate-decision-markets.html",
   "title": "Fed holds rates steady as markets wobble",
   "url_shown_at": 1745172463812,
-  "timestamp": 1745172463950,
   "date": 1745172463950,
   "filtered": false,
   "persisted": false
@@ -159,7 +155,6 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
   "url": "https://www.cnbc.com/2026/04/18/fed-rate-decision-markets.html",
   "title": "Fed holds rates steady as markets wobble",
   "url_shown_at": 1745172463812,
-  "timestamp": 1745172551226,
   "date": 1745172551226,
   "filtered": false,
   "tab_lifetime_ms": 87414,
@@ -181,7 +176,6 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
   "window_id": 12,
   "url": "CATEGORY:health",
   "url_shown_at": 1745172606000,
-  "timestamp": 1745172660000,
   "date": 1745172660000,
   "filtered": true,
   "filtered_by_list": "sensitive-sites",
@@ -203,7 +197,6 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
   "window_id": 12,
   "url": "",
   "url_shown_at": 1745172551230,
-  "timestamp": 1745172551230,
   "date": 1745172551230,
   "filtered": false
 }
@@ -265,7 +258,7 @@ BRIC defines load, unload, scroll, click, link_follow and link_follow_end as fol
   - a primary click, with or without Shift or Command, is `click`;
   - a right click, and a Mac Control-click (button 0 with Control held), is `contextmenu`, recorded as `click_type: right`;
   - `auxclick` is recorded only for the middle button and other buttons, such as a mouse's back and forward buttons, so a right click on Windows, where Chrome also fires `auxclick` after the menu, is still one record.
-- **Fields:** `click_id`, `click_type` (`primary`, `middle`, `right` or `other`), `button` (the browser's button number), `modifier_keys` (any of `shift`, `control`, `alt`, `meta`), `click_count` (1 for a single click, 2 for the second click of a double click), `on_link`, `claimed` (`true` only when another module claimed the click; see below), and the usual `url`, `session_id`, `tab_id` and `timestamp`.
+- **Fields:** `click_id`, `click_type` (`primary`, `middle`, `right` or `other`), `button` (the browser's button number), `modifier_keys` (any of `shift`, `control`, `alt`, `meta`), `click_count` (1 for a single click, 2 for the second click of a double click), `on_link`, `claimed` (`true` only when another module claimed the click; see below), and the usual `url`, `session_id`, `tab_id` and `date`.
 - **Link metadata:** for a click on or inside a link (`a[href]`), `link_url` (the absolute address, redacted like `url`), `link_text` (the visible text with whitespace collapsed, trimmed, at most 200 characters) and `link_target` (the `target` attribute, when it has one). `link_text` is left out when the page's address is hidden for any reason, including a domain-only list, where `title` becomes `"DOMAIN ONLY"`. On a page whose address is kept, a link whose own address the lists hide is recorded as `hidden_link_mode` decides (see **Configuration**); a link whose address the lists keep is unaffected by the mode.
 - **Passive:** the listener never calls `preventDefault` or `stopPropagation` and never delays navigation.
 - **Limits:**
@@ -279,7 +272,7 @@ BRIC defines load, unload, scroll, click, link_follow and link_follow_end as fol
 - **Definition:** `link_follow` is recorded when a click on a link of an allowed page opens a page: in the same tab, a new tab or a new window. `link_follow_end` is recorded once for each `link_follow` that has a destination tab, when the destination stops being followed. A `link_follow` with `open_mode: none` opened no page, so it has no `link_follow_end`; it is not a lost follow. Both are switched by `event_types.link_follow`, which is `false` by default.
 - **Why it is off by default:** the destination is not on the allow list. Following it means observing a tab outside the allow list, through the browser's tab and window events only (address, load, focus and close). Nothing runs on the destination page and nothing is recorded from it beyond what `hidden_link_mode` and the lists allow of its address.
 - **Matching:** a click starts a follow when it is a primary or middle click on a link, or a click another module claimed. It is matched to the first navigation of its tab, or the new tab or window opened by that tab, within `link_follow_match_window` milliseconds. A new tab matches by its opener, or by the click's address and time when the browser reports no opener. A double click gives one follow, for the second click. A link whose address is only a fragment, or `javascript:`, gives no follow. A claimed click with no navigation in the window gives a `link_follow` with `open_mode: none`.
-- **`link_follow` fields:** `click_id` (the `click_id` of the `click` record), `open_mode` (`same_tab`, `new_tab`, `new_window` or `none`), `matched_by` (`opener` or `address_and_time`; present only for `new_tab` and `new_window`, absent for `same_tab` and `none`), `target_tab_id` (the tab that shows the destination; absent for `none`), `is_result` (`true` only when another module claimed the click), and the usual `url` (the source page), `url_shown_at` (when the source page was shown), `session_id`, `tab_id` and `timestamp`. The record carries no judgment of the destination.
+- **`link_follow` fields:** `click_id` (the `click_id` of the `click` record), `open_mode` (`same_tab`, `new_tab`, `new_window` or `none`), `matched_by` (`opener` or `address_and_time`; present only for `new_tab` and `new_window`, absent for `same_tab` and `none`), `target_tab_id` (the tab that shows the destination; absent for `none`), `is_result` (`true` only when another module claimed the click), and the usual `url` (the source page), `url_shown_at` (when the source page was shown), `session_id`, `tab_id` and `date`. The record carries no judgment of the destination.
 - **`link_follow_end` fields:** `click_id`, `destination_url` (as `hidden_link_mode` and the lists allow; see **Configuration**), `shown_at` (when the destination was shown; absent when it never was), `first_focused_at` (when the destination tab was first in front once shown; absent when it never was), `total_focus_duration_ms` (milliseconds the destination tab was in front after it was shown; 0 when it was not shown), `before_load` (`true` when the follow ended before the destination was shown), `end_reason`, and the usual source page fields as on `link_follow`.
 - **`end_reason`:** `back` (the destination tab returned to the source page's address), `allow_listed_page` (the destination tab reached an allowed page), `new_follow` (a new click in the destination tab started another follow), `tab_closed` or `window_closed`.
 - **Time in front:** the destination counts as shown at the target tab's first `status: 'complete'`. Time in front is the tab's focused time since then, the same focus clock as `tab_focus` and `tab_blur`; a window that loses focus stops it.
@@ -449,12 +442,12 @@ Add to your extension's `package.json` dependencies:
 ```json
 {
   "dependencies": {
-    "@bric/rex-page-events": "github:bric-digital/rex-page-events#main"
+    "@bric/rex-page-events": "github:bric-digital/rex-page-events#<commit>"
   }
 }
 ```
 
-Then run `npm install`.
+Replace `<commit>` with the commit you build against, then run `npm install`.
 
 In your extension's `browser.ts`:
 
