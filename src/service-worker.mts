@@ -7,7 +7,7 @@ import rexCorePlugin, {
 import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
 import { type TabState, loadTabState, newTabState, saveTabState } from './tab-state.mjs'
-import { deliverUrlActive, subscribeUrlActive } from './url-active.mjs'
+import { deliverUrlActive } from './url-active.mjs'
 import {
   type ClickMessage,
   type PageEventMessage,
@@ -45,11 +45,6 @@ interface EmittedRecord {
   extras?: Record<string, unknown>
   urlShownAtMs?: number
 }
-
-export { type UrlActiveListener, subscribeUrlActive } from './url-active.mjs'
-
-// @ts-expect-error: __rexPageEventsUrlActive is not defined on the service worker's global object
-self.__rexPageEventsUrlActive = { subscribe: subscribeUrlActive }
 
 function shownAtMsOfPage(state: TabState, pageUrl: string): number {
   if (state.previousUrlShownAtMs !== null && pageUrl === state.previousUrl) {
