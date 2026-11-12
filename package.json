@@ -33,8 +33,8 @@
         "server": "node tests/scripts/run-server.js"
     },
     "dependencies": {
-        "@bric/rex-core": "github:bric-digital/rex-core#e7cd111aad3dd5bd2e103414c3488f8169d2b0d1",
-        "@bric/rex-types": "github:bric-digital/rex-types#76cbb61ce09be3a6d79d1b329a8f64c9ab505ef6"
+        "@bric/rex-core": "github:bric-digital/rex-core",
+        "@bric/rex-types": "github:bric-digital/rex-types"
     },
     "devDependencies": {
         "@playwright/test": "1.65.0",
