@@ -315,6 +315,30 @@ This module and `rex-history` use **two different kinds of coupling on purpose.*
 
 Put simply: loosely coupled in code, so each module is useful on its own, and tightly coupled in data, so the output can be analyzed as a single story.
 
+## Adopting this version
+
+For an extension that updates from an earlier version of this module (before the split into rex-page-events, rex-page-events-redaction and rex-link-follow).
+
+**Addresses.** Records now carry raw addresses and titles. To keep hiding them:
+
+- Add `rex-page-events-redaction`: its service-worker part, `@bric/rex-content-processing`, and a collector that runs content processors before it stores a record, such as `rex-data-collection` (and so `rex-local-download`).
+- Move `allow_lists`, `allow_all`, `filter_lists`, `domain_only_lists` and `hidden_link_mode` from `page_events` to `page_events_redaction`, and set `page_events_redaction.enabled: true`.
+- The processor's `hidden_link_mode` defaults to `text_only`. Set `hidden_link_mode: "show"` when link following is on, to keep the records earlier versions made.
+
+**Link following.**
+
+- Add `rex-link-follow`, both its browser and service-worker parts.
+- Move `page_events.event_types.link_follow` to `link_follow.enabled` and `page_events.link_follow_match_window` to `link_follow.match_window`, and copy the allow lists to `link_follow.allow_lists` (or `link_follow.allow_all`).
+- Add an `overrides` entry for `@bric/rex-page-events`, so one copy is bundled and `onClickSent` reports clicks from the same copy that records them.
+- `link_follow` and `link_follow_end` no longer carry `session_id` or `url_shown_at`; join a follow to its `click` record on `click_id`. `link_follow_end` gains `is_result`.
+- `linkFollowTotals` is answered by rex-link-follow.
+
+**rex-history.** Visits link to tabs only when the extension has the rex-history version that handles `pageUrlActive`. An older rex-history with this version of rex-page-events, or an older rex-page-events with that rex-history, links nothing and logs no error, so update both together. With this rex-page-events and an older rex-history, rex-core prints each unhandled url-active message, raw address included, to the service-worker console. The console stays on the device.
+
+**Removed.** The `debug` setting; the `__rexPageEventsUrlActive` global and `subscribeUrlActive`; the `timestamp` field, a duplicate of `date`, which keeps the same value.
+
+**An extension that imports only the browser part.** Nothing changes. Its page and click messages reach no service-worker module, before and after this version, and rex-history links no tabs there. To record page events, it would also import the service-worker part, and then the redaction processor.
+
 ## Installation
 
 Add to your extension's `package.json` dependencies:
