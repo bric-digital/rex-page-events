@@ -70,10 +70,6 @@ function urlActiveRecordOf(state: TabState, tabId: number, url: string, urlShown
   }
 }
 
-function tabStateWithoutTab(sessionId: string, windowId: number, shownAtMs: number): TabState {
-  return newTabState({ sessionId, windowId, shownAtMs, focused: false, url: '', title: '' })
-}
-
 class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   config: REXPageEventsConfiguration | null = null
   tabState: Map<number, TabState> = new Map()
@@ -372,7 +368,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
     const nowMs = Date.now()
-    const synthetic = tabStateWithoutTab(crypto.randomUUID(), windowId, nowMs)
+    const synthetic = newTabState({ sessionId: crypto.randomUUID(), windowId, shownAtMs: nowMs, focused: false, url: '', title: '' })
     await this.emit({ eventType: 'window_close', state: synthetic, url: '', title: '', dateMs: nowMs, extras: { window_id: windowId } })
   }
 
