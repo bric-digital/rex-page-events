@@ -246,9 +246,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     if (pageEventsConfig !== undefined) {
       this.config = pageEventsConfig
-      if (pageEventsConfig.debug === true) {
-        console.log(`${LOG_PREFIX} config loaded`, pageEventsConfig)
-      }
     }
   }
 
@@ -1104,11 +1101,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       } catch (err) {
         console.warn(`${LOG_PREFIX} url-active listener threw`, err)
       }
-    }
-
-    if (this.config?.debug === true) {
-      // Casts the URL-active record to the event shape dispatchEvent accepts.
-      dispatchEvent(record as unknown as { name: string } & Record<string, unknown>)
     }
   }
 

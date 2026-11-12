@@ -78,7 +78,6 @@ export interface REXPageEventsConfiguration {
   domain_only_lists?: string[]
   event_types?: Partial<Record<EventTypeSwitch, boolean>>
   hidden_link_mode?: HiddenLinkMode
-  debug?: boolean
   scroll_pause_delay?: number
   link_follow_match_window?: number
 }

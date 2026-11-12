@@ -129,6 +129,27 @@ test.describe('REX Page Events', () => {
     expect(typeof close.focus_duration_ms).toBe('number')
   })
 
+  test('with debug on, no rex-page-url-active record reaches the event bus', async ({ serviceWorker }) => {
+    await loadConfig(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, allow_all: true, debug: true } })
+    await waitForPageEventsConfig(serviceWorker)
+    await resetCaptured(serviceWorker)
+
+    const tabId = await serviceWorker.evaluate(async () => {
+      const tab = await chrome.tabs.create({ url: 'https://example.org/debug' })
+      return tab.id
+    })
+
+    await expect.poll(async () => {
+      const { events, urlActive } = await getCaptured(serviceWorker)
+      const opened = events.some((e) => e.event_type === 'tab_open' && e.tab_id === tabId)
+      const delivered = urlActive.some((r) => r.tab_id === tabId)
+      return opened && delivered
+    }, { timeout: 5000 }).toBe(true)
+
+    const { events } = await getCaptured(serviceWorker)
+    expect(events.filter((e) => e.name === 'rex-page-url-active')).toHaveLength(0)
+  })
+
   test('enabled: false from the start suppresses events', async ({ serviceWorker }) => {
     const disabled = { ...BASE_CONFIG, page_events: { enabled: false } }
     await loadConfig(serviceWorker, disabled)

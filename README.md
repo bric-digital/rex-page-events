@@ -215,7 +215,7 @@ Evaluation order for outbound events, the same as `rex-history`'s:
 
 Within one list, `rex-lists` matches the most specific pattern type first.
 
-**Important**: the internal `rex-page-url-active` record delivered to in-process subscribers (see **Linking to rex-history** below) is **never** redacted — it carries the raw URL by design. In default operation that record never leaves the extension. In `debug: true` mode it is additionally dispatched to the event bus, which means it reaches PDK and rex-local-download with the raw URL — do not enable debug in production deployments.
+**Important**: the internal `rex-page-url-active` record delivered to in-process subscribers (see **Linking to rex-history** below) is **never** redacted — it carries the raw URL by design. That record never leaves the extension.
 
 URL fragments are matched **exactly**: `https://a/#x` and `https://a/#y` are treated as different URLs both for event emission and for `rex-page-url-active` delivery.
 
@@ -387,7 +387,6 @@ This module reads from the `page_events` section of the backend config.
 | `event_types` | object | No | `click` and every other recorded type `true`; `link_follow` `false` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. `link_follow` is off by default and also switches `link_follow_end`; it is off because link following observes tabs outside the allow list. |
 | `domain_only_lists` | string[] | No | `[]` | Matching URLs are replaced with hostname; title becomes `"DOMAIN ONLY"`. |
 | `hidden_link_mode` | string | No | `show` while link following is on, `text_only` while it is off | What a click on an allowed page keeps of a link whose own address the lists hide: `show`, `text_only` or `hide`. Other values use the default. See below. |
-| `debug` | boolean | No | `false` | When `true`, `rex-page-url-active` records are additionally dispatched via the REX event bus so PDK and local-download persist them. Raw URLs leave the extension in this mode — use only for development/debugging. |
 | `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a finite number above 0 use the default. |
 | `event_types.link_follow` | boolean | No | `false` | Turns link following on: `link_follow` and `link_follow_end` records. See **link_follow and link_follow_end**. |
 | `link_follow_match_window` | number | No | `5000` | Milliseconds after a link click within which a navigation or new tab is matched to it. Values that are not a finite number above 0 use the default. |
@@ -417,8 +416,7 @@ No mode overrides a filter list. To keep every address and every link text, set 
     "allow_all": true,
     "filter_lists": ["sensitive-sites"],
     "domain_only_lists": ["coarse-domains"],
-    "event_types": { "scroll": false },
-    "debug": false
+    "event_types": { "scroll": false }
   }
 }
 ```

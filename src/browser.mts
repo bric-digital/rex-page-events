@@ -29,12 +29,6 @@ function waitForConfiguration(): Promise<Record<string, unknown> | undefined> {
   return chrome.runtime.sendMessage({ messageType: 'waitForConfiguration', event: { timeout: CONFIGURATION_TIMEOUT_MS } })
 }
 
-function isDebugOn(configuration: Record<string, unknown> | undefined): boolean {
-  const pageEvents = configuration?.page_events as REXPageEventsConfiguration | undefined
-
-  return pageEvents?.debug === true
-}
-
 function readScrollPauseMs(configuration: Record<string, unknown> | undefined): number {
   const pageEvents = configuration?.page_events as REXPageEventsConfiguration | undefined
   const pauseMs = pageEvents?.scroll_pause_delay
@@ -81,10 +75,6 @@ class REXPageEventsModule extends REXClientModule {
 
     waitForConfiguration()
       .then((configuration) => {
-        if (isDebugOn(configuration)) {
-          console.log('[rex-page-events] browser setup')
-        }
-
         this.scrollPauseMs = readScrollPauseMs(configuration)
         this.recordLoad()
         this.recordScroll()
