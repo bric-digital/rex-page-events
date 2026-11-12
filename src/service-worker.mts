@@ -59,6 +59,7 @@ import {
   redirectAddressOf,
 } from './link-follow.mjs'
 import { type TabState, loadTabState, newTabState, saveTabState } from './tab-state.mjs'
+import { deliverUrlActive, subscribeUrlActive } from './url-active.mjs'
 import {
   type ClickMessage,
   type LinkFollowTotal,
@@ -110,16 +111,7 @@ interface RedactionResult {
   allowed_by_list?: string
 }
 
-export type UrlActiveListener = (event: RexPageUrlActiveEvent) => void
-
-const urlActiveListeners: Set<UrlActiveListener> = new Set()
-
-export function subscribeUrlActive(listener: UrlActiveListener): () => void {
-  urlActiveListeners.add(listener)
-  return () => {
-    urlActiveListeners.delete(listener)
-  }
-}
+export { type UrlActiveListener, subscribeUrlActive } from './url-active.mjs'
 
 // @ts-expect-error: __rexPageEventsUrlActive is not defined on the service worker's global object
 self.__rexPageEventsUrlActive = { subscribe: subscribeUrlActive }
@@ -134,6 +126,17 @@ function extractHostname(url: string): string {
 
 function isOnTheWayToDestination(follow: OpenFollow, url: string): boolean {
   return follow.shownAtMs === undefined && (url === follow.redirectUrl || url === follow.destinationUrl)
+}
+
+function urlActiveRecordOf(state: TabState, tabId: number, url: string, urlShownAtMs: number): RexPageUrlActiveEvent {
+  return {
+    name: URL_ACTIVE_EVENT_NAME,
+    tab_id: tabId,
+    window_id: state.windowId,
+    session_id: state.sessionId,
+    url,
+    url_shown_at: urlShownAtMs,
+  }
 }
 
 function tabStateWithoutTab(sessionId: string, windowId: number, shownAtMs: number): TabState {
@@ -324,7 +327,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
 
     await this.emit({ eventType: 'tab_open', state, tabId: tab.id, url, title, dateMs: nowMs, extras })
-    this.deliverUrlActive(state, tab.id, url, nowMs)
+    deliverUrlActive(urlActiveRecordOf(state, tab.id, url, nowMs))
 
     await this.resolveNewTabFollow(tab, tab.id, nowMs)
 
@@ -387,7 +390,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     state.currentUrlFocusMs = 0
     state.lastTitle = tab.title || ''
 
-    this.deliverUrlActive(state, tabId, newUrl, nowMs)
+    deliverUrlActive(urlActiveRecordOf(state, tabId, newUrl, nowMs))
 
     await this.storeTabState()
   }
@@ -1007,30 +1010,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
 
     dispatchEvent(payload as { name: string } & Record<string, unknown>)
-  }
-
-  private deliverUrlActive(
-    state: TabState,
-    tabId: number,
-    url: string,
-    urlShownAtMs: number
-  ) {
-    const record: RexPageUrlActiveEvent = {
-      name: URL_ACTIVE_EVENT_NAME,
-      tab_id: tabId,
-      window_id: state.windowId,
-      session_id: state.sessionId,
-      url,
-      url_shown_at: urlShownAtMs,
-    }
-
-    for (const listener of urlActiveListeners) {
-      try {
-        listener(record)
-      } catch (err) {
-        console.warn(`${LOG_PREFIX} url-active listener threw`, err)
-      }
-    }
   }
 
   private async redact(url: string, title: string): Promise<RedactionResult> {
