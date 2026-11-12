@@ -58,6 +58,7 @@ import {
   newTabAddressOf,
   redirectAddressOf,
 } from './link-follow.mjs'
+import { type TabState, loadTabState, newTabState, saveTabState } from './tab-state.mjs'
 import {
   type ClickMessage,
   type LinkFollowTotal,
@@ -74,7 +75,6 @@ const URL_ACTIVE_EVENT_NAME = 'rex-page-url-active' as const
 const LOG_PREFIX = '[rex-page-events]'
 const CONFIGURATION_TIMEOUT_MS = 10000
 const SLOW_HANDLER_WARNING_MS = 10000
-const TAB_STATE_STORAGE_KEY = 'rexPageEventsTabState'
 
 const DEFAULT_EVENT_TYPES: Record<EventTypeSwitch, boolean> = {
   page_show: true,
@@ -89,19 +89,6 @@ const DEFAULT_EVENT_TYPES: Record<EventTypeSwitch, boolean> = {
   window_close: true,
   click: true,
   link_follow: false,
-}
-
-interface TabState {
-  sessionId: string
-  windowId: number
-  openedAtMs: number
-  lastFocusAtMs: number | null
-  focusDurationMs: number
-  currentUrl: string
-  currentUrlShownAtMs: number
-  currentUrlFocusMs: number
-  lastTitle: string
-  priorUrl: string | null
 }
 
 interface RedactionResult {
@@ -139,18 +126,7 @@ function isOnTheWayToDestination(follow: OpenFollow, url: string): boolean {
 }
 
 function tabStateWithoutTab(sessionId: string, windowId: number, shownAtMs: number): TabState {
-  return {
-    sessionId,
-    windowId,
-    openedAtMs: shownAtMs,
-    lastFocusAtMs: null,
-    focusDurationMs: 0,
-    currentUrl: '',
-    currentUrlShownAtMs: shownAtMs,
-    currentUrlFocusMs: 0,
-    lastTitle: '',
-    priorUrl: null,
-  }
+  return newTabState({ sessionId, windowId, shownAtMs, focused: false, url: '', title: '' })
 }
 
 class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
@@ -244,11 +220,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     return false
   }
 
-  private linkFollowTotals(now: number): LinkFollowTotal[] {
+  private linkFollowTotals(nowMs: number): LinkFollowTotal[] {
     return [...this.followState.open.values()].map((follow) => ({
       click_id: follow.clickId,
       shown: follow.shownAtMs !== undefined,
-      total_focus_duration_ms: this.timeInFrontOf(follow, now),
+      total_focus_duration_ms: this.timeInFrontOf(follow, nowMs),
     }))
   }
 
@@ -299,11 +275,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
 
-    const now = Date.now()
+    const nowMs = Date.now()
 
-    noteWindowCreated(this.followState, window.id, now)
-    this.scheduleExpiry(now)
-    await this.resolveHeldNewTabs(now)
+    noteWindowCreated(this.followState, window.id, nowMs)
+    this.scheduleExpiry(nowMs)
+    await this.resolveHeldNewTabs(nowMs)
     await this.storeFollowState()
   }
 
@@ -311,22 +287,18 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     if (!this.isEnabled() || tab.id === undefined) {
       return
     }
-    const now = Date.now()
+    const nowMs = Date.now()
     const url = tab.url || tab.pendingUrl || ''
     const title = tab.title || ''
 
-    const state: TabState = {
+    const state = newTabState({
       sessionId: crypto.randomUUID(),
       windowId: tab.windowId,
-      openedAtMs: now,
-      lastFocusAtMs: tab.active ? now : null,
-      focusDurationMs: 0,
-      currentUrl: url,
-      currentUrlShownAtMs: now,
-      currentUrlFocusMs: 0,
-      lastTitle: title,
-      priorUrl: null,
-    }
+      shownAtMs: nowMs,
+      focused: tab.active,
+      url,
+      title,
+    })
     this.tabState.set(tab.id, state)
 
     const extras: Record<string, unknown> = {}
@@ -340,37 +312,37 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       }
     }
 
-    await this.emit('tab_open', state, tab.id, url, title, now, extras)
-    this.deliverUrlActive(state, tab.id, url, now)
+    await this.emit('tab_open', state, tab.id, url, title, nowMs, extras)
+    this.deliverUrlActive(state, tab.id, url, nowMs)
 
-    await this.resolveNewTabFollow(tab, tab.id, now)
+    await this.resolveNewTabFollow(tab, tab.id, nowMs)
 
-    await this.saveTabState()
+    await this.storeTabState()
   }
 
   private async onTabUrlChanged(tabId: number, newUrl: string, tab: chrome.tabs.Tab) {
     if (!this.isEnabled()) {
       return
     }
-    const now = Date.now()
-    const state = this.tabState.get(tabId) ?? this.backfillTabState(tabId, tab, now)
+    const nowMs = Date.now()
+    const state = this.tabState.get(tabId) ?? this.backfillTabState(tabId, tab, nowMs)
 
     if (state.lastFocusAtMs !== null) {
-      const focusFragment = now - state.lastFocusAtMs
+      const focusFragment = nowMs - state.lastFocusAtMs
       state.focusDurationMs += focusFragment
       state.currentUrlFocusMs += focusFragment
-      state.lastFocusAtMs = now
+      state.lastFocusAtMs = nowMs
     }
 
     const outgoingUrl = state.currentUrl
     const outgoingTitle = state.lastTitle
     const urlFocusDurationMs = state.currentUrlFocusMs
-    const urlDwellMs = now - state.currentUrlShownAtMs
+    const urlDwellMs = nowMs - state.currentUrlShownAtMs
 
     let previousUrlRedacted: string | undefined
     let previousUrlFiltered: boolean | undefined
-    if (state.priorUrl !== null) {
-      const priorRedaction = await this.redact(state.priorUrl, '')
+    if (state.previousUrl !== null) {
+      const priorRedaction = await this.redact(state.previousUrl, '')
       previousUrlRedacted = priorRedaction.url
       previousUrlFiltered = priorRedaction.filtered
     }
@@ -381,7 +353,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       tabId,
       outgoingUrl,
       outgoingTitle,
-      now,
+      nowMs,
       {
         url_focus_duration_ms: urlFocusDurationMs,
         url_dwell_ms: urlDwellMs,
@@ -391,46 +363,46 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       state.currentUrlShownAtMs
     )
 
-    if (!(await this.resolveSameTabFollow(tabId, outgoingUrl, newUrl, now))) {
-      await this.applyFollowEndRules(tabId, newUrl, now)
+    if (!(await this.resolveSameTabFollow(tabId, outgoingUrl, newUrl, nowMs))) {
+      await this.applyFollowEndRules(tabId, newUrl, nowMs)
       await this.holdNavigationForLateClick({
-        tabId, fromUrl: outgoingUrl, fromShownAtMs: state.currentUrlShownAtMs, toUrl: newUrl, atMs: now,
+        tabId, fromUrl: outgoingUrl, fromShownAtMs: state.currentUrlShownAtMs, toUrl: newUrl, atMs: nowMs,
       })
     }
 
-    state.priorUrl = outgoingUrl
+    state.previousUrl = outgoingUrl
     state.currentUrl = newUrl
-    state.currentUrlShownAtMs = now
+    state.currentUrlShownAtMs = nowMs
     state.currentUrlFocusMs = 0
     state.lastTitle = tab.title || ''
 
-    this.deliverUrlActive(state, tabId, newUrl, now)
+    this.deliverUrlActive(state, tabId, newUrl, nowMs)
 
-    await this.saveTabState()
+    await this.storeTabState()
   }
 
   private async onTabRemoved(tabId: number, removeInfo: { windowId: number; isWindowClosing: boolean }) {
     if (!this.isEnabled()) {
       this.tabState.delete(tabId)
-      await this.saveTabState()
+      await this.storeTabState()
       return
     }
-    const now = Date.now()
+    const nowMs = Date.now()
     const state = this.tabState.get(tabId)
     if (state === undefined) {
-      await this.endFollowsTargeting(tabId, removeInfo.isWindowClosing ? 'window_closed' : 'tab_closed', now)
+      await this.endFollowsTargeting(tabId, removeInfo.isWindowClosing ? 'window_closed' : 'tab_closed', nowMs)
       return
     }
 
     if (state.lastFocusAtMs !== null) {
-      const fragment = now - state.lastFocusAtMs
+      const fragment = nowMs - state.lastFocusAtMs
       state.focusDurationMs += fragment
       state.currentUrlFocusMs += fragment
       state.lastFocusAtMs = null
     }
 
-    const tabLifetimeMs = now - state.openedAtMs
-    const urlDwellMs = now - state.currentUrlShownAtMs
+    const tabLifetimeMs = nowMs - state.openedAtMs
+    const urlDwellMs = nowMs - state.currentUrlShownAtMs
 
     await this.emit(
       'tab_close',
@@ -438,7 +410,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       tabId,
       state.currentUrl,
       state.lastTitle,
-      now,
+      nowMs,
       {
         tab_lifetime_ms: tabLifetimeMs,
         focus_duration_ms: state.focusDurationMs,
@@ -448,52 +420,52 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       }
     )
 
-    await this.endFollowsTargeting(tabId, removeInfo.isWindowClosing ? 'window_closed' : 'tab_closed', now)
+    await this.endFollowsTargeting(tabId, removeInfo.isWindowClosing ? 'window_closed' : 'tab_closed', nowMs)
 
     this.tabState.delete(tabId)
-    await this.saveTabState()
+    await this.storeTabState()
   }
 
   private async onTabActivated(tabId: number, windowId: number) {
     if (!this.isEnabled()) {
       return
     }
-    const now = Date.now()
+    const nowMs = Date.now()
 
     for (const [otherTabId, otherState] of this.tabState.entries()) {
       if (otherTabId !== tabId && otherState.windowId === windowId && otherState.lastFocusAtMs !== null) {
-        const fragment = now - otherState.lastFocusAtMs
+        const fragment = nowMs - otherState.lastFocusAtMs
         otherState.focusDurationMs += fragment
         otherState.currentUrlFocusMs += fragment
         otherState.lastFocusAtMs = null
-        await this.emit('tab_blur', otherState, otherTabId, otherState.currentUrl, otherState.lastTitle, now)
+        await this.emit('tab_blur', otherState, otherTabId, otherState.currentUrl, otherState.lastTitle, nowMs)
       }
     }
 
     const state = this.tabState.get(tabId)
     if (state !== undefined && state.lastFocusAtMs === null) {
-      state.lastFocusAtMs = now
-      await this.emit('tab_focus', state, tabId, state.currentUrl, state.lastTitle, now)
-      await this.noteFollowTargetFocused(tabId, now)
+      state.lastFocusAtMs = nowMs
+      await this.emit('tab_focus', state, tabId, state.currentUrl, state.lastTitle, nowMs)
+      await this.noteFollowTargetFocused(tabId, nowMs)
     }
 
-    await this.saveTabState()
+    await this.storeTabState()
   }
 
   private async onWindowFocusChanged(windowId: number) {
     if (!this.isEnabled()) {
       return
     }
-    const now = Date.now()
+    const nowMs = Date.now()
     const windowLost = windowId === chrome.windows.WINDOW_ID_NONE
 
     for (const [tabId, state] of this.tabState.entries()) {
       if (state.lastFocusAtMs !== null && (windowLost || state.windowId !== windowId)) {
-        const fragment = now - state.lastFocusAtMs
+        const fragment = nowMs - state.lastFocusAtMs
         state.focusDurationMs += fragment
         state.currentUrlFocusMs += fragment
         state.lastFocusAtMs = null
-        await this.emit('tab_blur', state, tabId, state.currentUrl, state.lastTitle, now)
+        await this.emit('tab_blur', state, tabId, state.currentUrl, state.lastTitle, nowMs)
       }
     }
 
@@ -502,22 +474,22 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       const state = activeTab?.id === undefined ? undefined : this.tabState.get(activeTab.id)
 
       if (activeTab?.id !== undefined && state !== undefined && state.lastFocusAtMs === null) {
-        state.lastFocusAtMs = now
-        await this.emit('tab_focus', state, activeTab.id, state.currentUrl, state.lastTitle, now)
-        await this.noteFollowTargetFocused(activeTab.id, now)
+        state.lastFocusAtMs = nowMs
+        await this.emit('tab_focus', state, activeTab.id, state.currentUrl, state.lastTitle, nowMs)
+        await this.noteFollowTargetFocused(activeTab.id, nowMs)
       }
     }
 
-    await this.saveTabState()
+    await this.storeTabState()
   }
 
   private async onWindowRemoved(windowId: number) {
     if (!this.isEnabled()) {
       return
     }
-    const now = Date.now()
-    const synthetic = tabStateWithoutTab(crypto.randomUUID(), windowId, now)
-    await this.emit('window_close', synthetic, undefined, '', '', now, { window_id: windowId })
+    const nowMs = Date.now()
+    const synthetic = tabStateWithoutTab(crypto.randomUUID(), windowId, nowMs)
+    await this.emit('window_close', synthetic, undefined, '', '', nowMs, { window_id: windowId })
   }
 
   private async recordPageEvent(
@@ -528,11 +500,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
     const tabId = sender.tab.id
-    const now = typeof message.timestamp === 'number' ? message.timestamp : Date.now()
+    const nowMs = typeof message.timestamp === 'number' ? message.timestamp : Date.now()
     const url = message.url ?? sender.tab.url ?? ''
     const title = message.title ?? sender.tab.title ?? ''
 
-    const state = this.tabState.get(tabId) ?? this.backfillTabState(tabId, sender.tab, now)
+    const state = this.tabState.get(tabId) ?? this.backfillTabState(tabId, sender.tab, nowMs)
 
     state.lastTitle = title
 
@@ -545,13 +517,13 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       extras.scroll_position = message.scroll_position
     }
 
-    await this.emit(message.event_type, state, tabId, url, title, now, extras)
+    await this.emit(message.event_type, state, tabId, url, title, nowMs, extras)
 
     if (message.event_type === 'page_show' && message.persisted === true) {
-      await this.endFollowsReturningTo(tabId, url, now)
+      await this.endFollowsReturningTo(tabId, url, nowMs)
     }
 
-    await this.saveTabState()
+    await this.storeTabState()
   }
 
   private async recordClick(message: ClickMessage, sender: chrome.runtime.MessageSender) {
@@ -559,18 +531,18 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
     const tabId = sender.tab.id
-    const timestamp = typeof message.timestamp === 'number' ? message.timestamp : Date.now()
+    const dateMs = typeof message.timestamp === 'number' ? message.timestamp : Date.now()
     const url = message.url ?? sender.tab.url ?? ''
     const title = message.title ?? sender.tab.title ?? ''
-    const state = this.tabState.get(tabId) ?? this.backfillTabState(tabId, sender.tab, timestamp)
-    const pageShownAtMs = sourceShownAtMsOf(this.followState, tabId, url, timestamp) ?? state.currentUrlShownAtMs
+    const state = this.tabState.get(tabId) ?? this.backfillTabState(tabId, sender.tab, dateMs)
+    const pageShownAtMs = sourceShownAtMsOf(this.followState, tabId, url, dateMs) ?? state.currentUrlShownAtMs
 
     state.lastTitle = title
 
-    await this.emit('click', state, tabId, url, title, timestamp, await this.clickExtras(message, url), pageShownAtMs)
-    await this.startPendingFollow(message, sender.tab, state, url, pageShownAtMs, timestamp)
+    await this.emit('click', state, tabId, url, title, dateMs, await this.clickExtras(message, url), pageShownAtMs)
+    await this.startPendingFollow(message, sender.tab, state, url, pageShownAtMs, dateMs)
 
-    await this.saveTabState()
+    await this.storeTabState()
   }
 
   private async clickExtras(message: ClickMessage, pageUrl: string): Promise<Record<string, unknown>> {
@@ -684,28 +656,28 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   }
 
   private async expirePendingClicks() {
-    const now = Date.now()
-    const expired = takeExpiredClicks(this.followState, now, this.matchWindowMs())
+    const nowMs = Date.now()
+    const expired = takeExpiredClicks(this.followState, nowMs, this.matchWindowMs())
 
-    dropExpiredHeldNewTabs(this.followState, now, this.matchWindowMs())
-    dropExpiredHeldNavigations(this.followState, now, this.matchWindowMs())
-    dropExpiredWindowCreations(this.followState, now, this.matchWindowMs())
+    dropExpiredHeldNewTabs(this.followState, nowMs, this.matchWindowMs())
+    dropExpiredHeldNavigations(this.followState, nowMs, this.matchWindowMs())
+    dropExpiredWindowCreations(this.followState, nowMs, this.matchWindowMs())
 
     for (const click of expired.filter((candidate) => candidate.claimed)) {
-      await this.emitLinkFollow(click, 'none', undefined, undefined, now)
+      await this.emitLinkFollow(click, 'none', undefined, undefined, nowMs)
     }
 
     await this.storeFollowState()
   }
 
-  private async resolveSameTabFollow(tabId: number, fromUrl: string, toUrl: string, now: number): Promise<boolean> {
-    const click = matchSameTab(this.followState.pending, tabId, fromUrl, toUrl, now, this.matchWindowMs())
+  private async resolveSameTabFollow(tabId: number, fromUrl: string, toUrl: string, nowMs: number): Promise<boolean> {
+    const click = matchSameTab(this.followState.pending, tabId, fromUrl, toUrl, nowMs, this.matchWindowMs())
 
     if (click === null) {
       return false
     }
 
-    await this.resolveFollow(click, 'same_tab', undefined, tabId, toUrl, now)
+    await this.resolveFollow(click, 'same_tab', undefined, tabId, toUrl, nowMs)
 
     return true
   }
@@ -737,27 +709,27 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     await this.resolveFollow(click, 'same_tab', undefined, navigation.tabId, navigation.toUrl, navigation.atMs, shown)
   }
 
-  private async resolveNewTabFollow(tab: chrome.tabs.Tab, tabId: number, now: number) {
+  private async resolveNewTabFollow(tab: chrome.tabs.Tab, tabId: number, nowMs: number) {
     if (!this.isEventTypeOn('link_follow')) {
       return
     }
 
     const description = { openerTabId: tab.openerTabId, windowId: tab.windowId, pendingUrl: tab.pendingUrl, url: tab.url || undefined }
     const match = matchNewTab(
-      this.followState.pending, description, now, this.matchWindowMs(), windowCreatedAtMsOf(this.followState, tab.windowId)
+      this.followState.pending, description, nowMs, this.matchWindowMs(), windowCreatedAtMsOf(this.followState, tab.windowId)
     )
 
     if (match !== null) {
-      await this.resolveFollow(match.click, match.openMode, match.matchedBy, tabId, newTabAddressOf(tab), now)
+      await this.resolveFollow(match.click, match.openMode, match.matchedBy, tabId, newTabAddressOf(tab), nowMs)
       return
     }
 
-    holdNewTab(this.followState, { tabId, tab: description, createdAtMs: now })
-    this.scheduleExpiry(now)
+    holdNewTab(this.followState, { tabId, tab: description, createdAtMs: nowMs })
+    this.scheduleExpiry(nowMs)
     await this.storeFollowState()
   }
 
-  private async resolveHeldNewTabs(now: number) {
+  private async resolveHeldNewTabs(nowMs: number) {
     for (const held of [...this.followState.heldNewTabs]) {
       const match = matchNewTab(
         this.followState.pending, held.tab, held.createdAtMs, this.matchWindowMs(), windowCreatedAtMsOf(this.followState, held.tab.windowId)
@@ -765,7 +737,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
       if (match !== null) {
         releaseHeldNewTab(this.followState, held.tabId)
-        await this.resolveFollow(match.click, match.openMode, match.matchedBy, held.tabId, newTabAddressOf(held.tab), now)
+        await this.resolveFollow(match.click, match.openMode, match.matchedBy, held.tabId, newTabAddressOf(held.tab), nowMs)
       }
     }
   }
@@ -776,10 +748,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     matchedBy: MatchedBy | undefined,
     targetTabId: number,
     destinationUrl: string | undefined,
-    now: number,
+    nowMs: number,
     shown: ShownTimes = {}
   ) {
-    await this.endFollowsTargeting(click.tabId, 'new_follow', now)
+    await this.endFollowsTargeting(click.tabId, 'new_follow', nowMs)
 
     const knownDestinationUrl = destinationUrl ?? await this.pendingAddressOf(targetTabId)
 
@@ -800,7 +772,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       ...shown,
     })
 
-    await this.emitLinkFollow(click, openMode, matchedBy, targetTabId, now)
+    await this.emitLinkFollow(click, openMode, matchedBy, targetTabId, nowMs)
     await this.storeFollowState()
   }
 
@@ -809,11 +781,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     openMode: OpenMode,
     matchedBy: MatchedBy | undefined,
     targetTabId: number | undefined,
-    now: number
+    nowMs: number
   ) {
     const sourceState = this.sourceTabStateOf(click.tabId, click.sessionId, click.windowId, click.clickedAtMs)
 
-    await this.emit('link_follow', sourceState, click.tabId, click.sourceUrl, undefined, now, {
+    await this.emit('link_follow', sourceState, click.tabId, click.sourceUrl, undefined, nowMs, {
       click_id: click.clickId,
       open_mode: openMode,
       matched_by: matchedBy,
@@ -847,11 +819,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
 
-    const now = Date.now()
+    const nowMs = Date.now()
     const shown: ShownTimes = {
-      shownAtMs: now,
-      focusAtShownMs: focusedMsAt(state.focusDurationMs, state.lastFocusAtMs, now),
-      firstFocusedAtMs: state.lastFocusAtMs === null ? undefined : now,
+      shownAtMs: nowMs,
+      focusAtShownMs: focusedMsAt(state.focusDurationMs, state.lastFocusAtMs, nowMs),
+      firstFocusedAtMs: state.lastFocusAtMs === null ? undefined : nowMs,
     }
 
     for (const follow of unshown) {
@@ -865,12 +837,12 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     await this.storeFollowState()
   }
 
-  private async noteFollowTargetFocused(tabId: number, now: number) {
+  private async noteFollowTargetFocused(tabId: number, nowMs: number) {
     const unfocused = followsTargeting(this.followState, tabId)
       .filter((follow) => follow.shownAtMs !== undefined && follow.firstFocusedAtMs === undefined)
 
     for (const follow of unfocused) {
-      follow.firstFocusedAtMs = now
+      follow.firstFocusedAtMs = nowMs
     }
 
     if (unfocused.length > 0) {
@@ -878,8 +850,8 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
   }
 
-  private async applyFollowEndRules(tabId: number, newUrl: string, now: number) {
-    await this.endFollowsReturningTo(tabId, newUrl, now)
+  private async applyFollowEndRules(tabId: number, newUrl: string, nowMs: number) {
+    await this.endFollowsReturningTo(tabId, newUrl, nowMs)
 
     const follows = followsTargeting(this.followState, tabId)
 
@@ -891,7 +863,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     for (const follow of follows) {
       if (allowedPage && !isOnTheWayToDestination(follow, newUrl)) {
-        await this.endFollow(follow, 'allow_listed_page', now)
+        await this.endFollow(follow, 'allow_listed_page', nowMs)
       } else if (follow.shownAtMs === undefined) {
         follow.destinationUrl = newUrl
       }
@@ -900,42 +872,42 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     await this.storeFollowState()
   }
 
-  private async endFollowsReturningTo(tabId: number, url: string, now: number) {
+  private async endFollowsReturningTo(tabId: number, url: string, nowMs: number) {
     for (const follow of followsTargeting(this.followState, tabId).filter((open) => open.sourceUrl === url)) {
-      await this.endFollow(follow, 'back', now)
+      await this.endFollow(follow, 'back', nowMs)
     }
   }
 
-  private async endFollowsTargeting(tabId: number, reason: EndReason, now: number) {
+  private async endFollowsTargeting(tabId: number, reason: EndReason, nowMs: number) {
     for (const follow of followsTargeting(this.followState, tabId)) {
-      await this.endFollow(follow, reason, now)
+      await this.endFollow(follow, reason, nowMs)
     }
   }
 
-  private async endFollow(follow: OpenFollow, reason: EndReason, now: number) {
+  private async endFollow(follow: OpenFollow, reason: EndReason, nowMs: number) {
     closeFollow(this.followState, follow.clickId)
 
-    const sourceState = this.sourceTabStateOf(follow.sourceTabId, follow.sourceSessionId, follow.sourceWindowId, now)
-    await this.emit('link_follow_end', sourceState, follow.sourceTabId, follow.sourceUrl, undefined, now, {
+    const sourceState = this.sourceTabStateOf(follow.sourceTabId, follow.sourceSessionId, follow.sourceWindowId, nowMs)
+    await this.emit('link_follow_end', sourceState, follow.sourceTabId, follow.sourceUrl, undefined, nowMs, {
       click_id: follow.clickId,
       destination_url: await this.redactDestination(this.destinationAddressOf(follow), follow.claimed),
       shown_at: follow.shownAtMs,
       first_focused_at: follow.firstFocusedAtMs,
-      total_focus_duration_ms: this.timeInFrontOf(follow, now),
+      total_focus_duration_ms: this.timeInFrontOf(follow, nowMs),
       before_load: follow.shownAtMs === undefined,
       end_reason: reason,
     }, follow.sourceUrlShownAtMs)
     await this.storeFollowState()
   }
 
-  private timeInFrontOf(follow: OpenFollow, now: number): number {
+  private timeInFrontOf(follow: OpenFollow, nowMs: number): number {
     const state = this.tabState.get(follow.targetTabId)
 
     if (follow.focusAtShownMs === undefined || state === undefined) {
       return 0
     }
 
-    return Math.max(0, focusedMsAt(state.focusDurationMs, state.lastFocusAtMs, now) - follow.focusAtShownMs)
+    return Math.max(0, focusedMsAt(state.focusDurationMs, state.lastFocusAtMs, nowMs) - follow.focusAtShownMs)
   }
 
   private destinationAddressOf(follow: OpenFollow): string {
@@ -967,7 +939,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     tabId: number | undefined,
     url: string,
     title: string | undefined,
-    timestamp: number,
+    dateMs: number,
     extras: Record<string, unknown> = {},
     urlShownAtOverrideMs?: number
   ) {
@@ -984,7 +956,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       window_id: state.windowId,
       url: redaction.url,
       url_shown_at: urlShownAtOverrideMs ?? state.currentUrlShownAtMs,
-      date: timestamp,
+      date: dateMs,
       filtered: redaction.filtered,
     }
     if (tabId !== undefined) {
@@ -1146,20 +1118,18 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     return typeof configured === 'boolean' ? configured : DEFAULT_EVENT_TYPES[switchName]
   }
 
-  private saveTabState(): Promise<void> {
-    return chrome.storage.session.set({ [TAB_STATE_STORAGE_KEY]: Array.from(this.tabState.entries()) })
+  private storeTabState(): Promise<void> {
+    return saveTabState(this.tabState)
       .catch((error: unknown) => {
         console.debug(`${LOG_PREFIX} could not save tab state`, error)
       })
   }
 
   private loadSavedTabState(): Promise<void> {
-    return chrome.storage.session.get(TAB_STATE_STORAGE_KEY)
+    return loadTabState()
       .then((saved) => {
-        const entries = saved[TAB_STATE_STORAGE_KEY] as [number, TabState][] | undefined
-
-        if (entries !== undefined) {
-          this.tabState = new Map(entries)
+        if (saved !== null) {
+          this.tabState = saved
         }
       })
       .catch((error: unknown) => {
@@ -1177,20 +1147,15 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       })
   }
 
-  private backfillTabState(tabId: number, tab: chrome.tabs.Tab | undefined, now: number): TabState {
-    const url = tab?.url ?? ''
-    const state: TabState = {
+  private backfillTabState(tabId: number, tab: chrome.tabs.Tab | undefined, nowMs: number): TabState {
+    const state = newTabState({
       sessionId: crypto.randomUUID(),
       windowId: tab?.windowId ?? -1,
-      openedAtMs: now,
-      lastFocusAtMs: tab?.active ? now : null,
-      focusDurationMs: 0,
-      currentUrl: url,
-      currentUrlShownAtMs: now,
-      currentUrlFocusMs: 0,
-      lastTitle: tab?.title ?? '',
-      priorUrl: null,
-    }
+      shownAtMs: nowMs,
+      focused: tab?.active === true,
+      url: tab?.url ?? '',
+      title: tab?.title ?? '',
+    })
     this.tabState.set(tabId, state)
     return state
   }
