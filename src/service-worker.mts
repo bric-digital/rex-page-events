@@ -4,23 +4,12 @@ import rexCorePlugin, {
   registerREXModule,
   dispatchEvent,
 } from '@bric/rex-core/service-worker'
-import { matchDomainAgainstList } from '@bric/rex-lists'
 import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
-import {
-  type ClickLinkFields,
-  type FilterListLookup,
-  type LinkRedaction,
-  claimsRevealingOrigin,
-  clickLinkFieldsFor,
-  hiddenLinkModeOf,
-  revealsOrigin,
-} from './hidden-link-mode.mjs'
 import { type TabState, loadTabState, newTabState, saveTabState } from './tab-state.mjs'
 import { deliverUrlActive, subscribeUrlActive } from './url-active.mjs'
 import {
   type ClickMessage,
-  type HiddenLinkMode,
   type PageEventMessage,
   type PageEventType,
   type REXPageEventsConfiguration,
@@ -57,26 +46,10 @@ interface EmittedRecord {
   urlShownAtMs?: number
 }
 
-interface RedactionResult {
-  url: string
-  title?: string
-  filtered: boolean
-  filtered_by_list?: string
-  allowed_by_list?: string
-}
-
 export { type UrlActiveListener, subscribeUrlActive } from './url-active.mjs'
 
 // @ts-expect-error: __rexPageEventsUrlActive is not defined on the service worker's global object
 self.__rexPageEventsUrlActive = { subscribe: subscribeUrlActive }
-
-function extractHostname(url: string): string {
-  try {
-    return new URL(url).hostname
-  } catch {
-    return ''
-  }
-}
 
 function shownAtMsOfPage(state: TabState, pageUrl: string): number {
   if (state.previousUrlShownAtMs !== null && pageUrl === state.previousUrl) {
@@ -241,9 +214,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       extras.opener_tab_id = tab.openerTabId
       const openerState = this.tabState.get(tab.openerTabId)
       if (openerState !== undefined && openerState.currentUrl !== '') {
-        const openerRedaction = await this.redact(openerState.currentUrl, '')
-        extras.opener_url = openerRedaction.url
-        extras.opener_filtered = openerRedaction.filtered
+        extras.opener_url = openerState.currentUrl
       }
     }
 
@@ -272,14 +243,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const urlFocusDurationMs = state.currentUrlFocusMs
     const urlDwellMs = nowMs - state.currentUrlShownAtMs
 
-    let previousUrlRedacted: string | undefined
-    let previousUrlFiltered: boolean | undefined
-    if (state.previousUrl !== null) {
-      const priorRedaction = await this.redact(state.previousUrl, '')
-      previousUrlRedacted = priorRedaction.url
-      previousUrlFiltered = priorRedaction.filtered
-    }
-
     await this.emit({
       eventType: 'tab_url_change',
       state,
@@ -290,8 +253,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       extras: {
         url_focus_duration_ms: urlFocusDurationMs,
         url_dwell_ms: urlDwellMs,
-        previous_url: previousUrlRedacted,
-        previous_url_filtered: previousUrlFiltered,
+        previous_url: state.previousUrl ?? undefined,
       },
       urlShownAtMs: state.currentUrlShownAtMs,
     })
@@ -464,66 +426,11 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       url,
       title,
       dateMs,
-      extras: await this.clickExtras(message, url),
+      extras: clickExtrasOf(message),
       urlShownAtMs: pageShownAtMs,
     })
 
     await this.storeTabState()
-  }
-
-  private async clickExtras(message: ClickMessage, pageUrl: string): Promise<Record<string, unknown>> {
-    const pageHidden = (await this.redact(pageUrl, message.title)).filtered
-    const linkFields = pageHidden ? await this.hiddenPageLinkFields(message) : await this.allowedPageLinkFields(message, pageUrl)
-
-    return {
-      click_id: message.click_id,
-      click_type: message.click_type,
-      button: message.button,
-      modifier_keys: message.modifier_keys,
-      click_count: message.click_count,
-      on_link: message.on_link,
-      ...linkFields,
-      link_target: message.link_target,
-      claimed: message.claim === undefined ? undefined : true,
-    }
-  }
-
-  private async hiddenPageLinkFields(message: ClickMessage): Promise<Partial<ClickLinkFields>> {
-    const address = linkAddressOf(message)
-
-    if (address === undefined) {
-      return {}
-    }
-
-    return { link_url: (await this.redact(address, '')).url }
-  }
-
-  private async allowedPageLinkFields(message: ClickMessage, pageUrl: string): Promise<Partial<ClickLinkFields>> {
-    const address = linkAddressOf(message)
-
-    if (address === undefined) {
-      return { link_text: message.link_text }
-    }
-
-    const mayRevealOrigin = claimsRevealingOrigin(message.claim !== undefined, address, pageUrl)
-    const redaction = await this.redact(address, '')
-    const mode = this.hiddenLinkMode()
-    const filterLookup = await this.filterLookupFor(mode, mayRevealOrigin, redaction, address)
-
-    return clickLinkFieldsFor(mode, mayRevealOrigin, redaction, address, message.link_text, filterLookup)
-  }
-
-  private hiddenLinkMode(): HiddenLinkMode {
-    return hiddenLinkModeOf(this.config?.hidden_link_mode, false)
-  }
-
-  private filterLookupFor(
-    mode: HiddenLinkMode,
-    claimed: boolean,
-    redaction: LinkRedaction,
-    address: string
-  ): Promise<FilterListLookup | null> {
-    return revealsOrigin(mode, claimed, redaction) ? this.lookUpFilterLists(address) : Promise.resolve(null)
   }
 
   private async emit(record: EmittedRecord) {
@@ -533,29 +440,20 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
 
-    const redaction = await this.redact(url, title ?? '')
-
     const payload: Record<string, unknown> = {
       name: EVENT_NAME,
       event_type: eventType,
       session_id: state.sessionId,
       window_id: state.windowId,
-      url: redaction.url,
+      url,
       url_shown_at: urlShownAtMs ?? state.currentUrlShownAtMs,
       date: dateMs,
-      filtered: redaction.filtered,
     }
     if (tabId !== undefined) {
       payload.tab_id = tabId
     }
-    if (title !== undefined && redaction.title !== undefined) {
-      payload.title = redaction.title
-    }
-    if (redaction.filtered_by_list !== undefined) {
-      payload.filtered_by_list = redaction.filtered_by_list
-    }
-    if (redaction.allowed_by_list !== undefined) {
-      payload.allowed_by_list = redaction.allowed_by_list
+    if (title !== undefined) {
+      payload.title = title
     }
     for (const [k, v] of Object.entries(extras)) {
       if (v !== undefined) {
@@ -564,110 +462,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
 
     dispatchEvent(payload as { name: string } & Record<string, unknown>)
-  }
-
-  private async redact(url: string, title: string): Promise<RedactionResult> {
-    if (!url) {
-      return { url, title, filtered: false }
-    }
-
-    const domainOnly = await this.applyDomainOnlyLists(url)
-    if (domainOnly !== null) {
-      return domainOnly
-    }
-
-    const { allowed, allowedBy } = await this.allowCheck(url)
-    if (!allowed) {
-      return {
-        url: 'CATEGORY:NOT_ON_ALLOWLIST',
-        filtered: true,
-        filtered_by_list: 'NOT_ON_ALLOWLIST',
-      }
-    }
-    const allowedByField = allowedBy ? { allowed_by_list: allowedBy } : {}
-
-    const filtered = await this.applyFilterLists(url)
-    if (filtered !== null) {
-      return { ...filtered, ...allowedByField }
-    }
-    return { url, title, filtered: false, ...allowedByField }
-  }
-
-  private async isAllowedPage(url: string): Promise<boolean> {
-    return (await this.allowCheck(url)).allowed
-  }
-
-  private async allowCheck(url: string): Promise<{ allowed: boolean; allowedBy?: string }> {
-    if (this.config?.allow_all === true) {
-      return { allowed: true }
-    }
-
-    const allowedBy = await this.findAllowList(url)
-
-    return allowedBy === null ? { allowed: false } : { allowed: true, allowedBy }
-  }
-
-  private async findAllowList(url: string): Promise<string | null> {
-    for (const listName of this.config?.allow_lists ?? []) {
-      try {
-        if (await matchDomainAgainstList(url, listName)) {
-          return listName
-        }
-      } catch (err) {
-        console.warn(`${LOG_PREFIX} allow list error on ${listName}`, err)
-      }
-    }
-    return null
-  }
-
-  private async applyFilterLists(url: string): Promise<RedactionResult | null> {
-    return (await this.lookUpFilterLists(url)).match
-  }
-
-  private async lookUpFilterLists(url: string): Promise<{ match: RedactionResult | null; failed: boolean }> {
-    const lists = this.config?.filter_lists ?? []
-    let failed = false
-    for (const listName of lists) {
-      try {
-        const entry = await matchDomainAgainstList(url, listName)
-        if (entry) {
-          const category = (entry.metadata?.category as string | undefined) ?? null
-          return {
-            match: {
-              url: `CATEGORY:${category ?? 'null'}`,
-              filtered: true,
-              filtered_by_list: listName,
-            },
-            failed,
-          }
-        }
-      } catch (err) {
-        console.warn(`${LOG_PREFIX} filter list error on ${listName}`, err)
-        failed = true
-      }
-    }
-    return { match: null, failed }
-  }
-
-  private async applyDomainOnlyLists(url: string): Promise<RedactionResult | null> {
-    const lists = this.config?.domain_only_lists ?? []
-    for (const listName of lists) {
-      try {
-        const entry = await matchDomainAgainstList(url, listName)
-        if (entry) {
-          const hostname = extractHostname(url)
-          return {
-            url: hostname,
-            title: 'DOMAIN ONLY',
-            filtered: true,
-            filtered_by_list: listName,
-          }
-        }
-      } catch (err) {
-        console.warn(`${LOG_PREFIX} domain_only list error on ${listName}`, err)
-      }
-    }
-    return null
   }
 
   private isEnabled(): boolean {
@@ -709,6 +503,21 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     })
     this.tabState.set(tabId, state)
     return state
+  }
+}
+
+function clickExtrasOf(message: ClickMessage): Record<string, unknown> {
+  return {
+    click_id: message.click_id,
+    click_type: message.click_type,
+    button: message.button,
+    modifier_keys: message.modifier_keys,
+    click_count: message.click_count,
+    on_link: message.on_link,
+    link_url: linkAddressOf(message),
+    link_text: message.link_text,
+    link_target: message.link_target,
+    claimed: message.claim === undefined ? undefined : true,
   }
 }
 

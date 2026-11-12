@@ -12,8 +12,6 @@ export type PageEventType =
 
 export type ClickType = 'primary' | 'middle' | 'right' | 'other'
 
-export type HiddenLinkMode = 'show' | 'text_only' | 'hide'
-
 export type ModifierKey = 'shift' | 'control' | 'alt' | 'meta'
 
 export interface ScrollPosition {
@@ -58,11 +56,6 @@ export interface ClickMessage {
 
 export interface REXPageEventsConfiguration {
   enabled: boolean
-  filter_lists?: string[]
-  allow_lists?: string[]
-  allow_all?: boolean
-  domain_only_lists?: string[]
   event_types?: Partial<Record<PageEventType, boolean>>
-  hidden_link_mode?: HiddenLinkMode
   scroll_pause_delay?: number
 }

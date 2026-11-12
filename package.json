@@ -1,7 +1,7 @@
 {
     "name": "@bric/rex-page-events",
     "version": "0.0.1",
-    "description": "REX module that records page, tab, and window lifecycle events with optional URL redaction via rex-lists.",
+    "description": "REX module that records page, tab, and window lifecycle events and clicks.",
     "keywords": [
         "extension",
         "rex"
@@ -34,7 +34,6 @@
     },
     "dependencies": {
         "@bric/rex-core": "github:bric-digital/rex-core#e7cd111aad3dd5bd2e103414c3488f8169d2b0d1",
-        "@bric/rex-lists": "github:bric-digital/rex-lists#f4beb8b51bb972d01dde261f91bd49e0f06e6424",
         "@bric/rex-types": "github:bric-digital/rex-types#76cbb61ce09be3a6d79d1b329a8f64c9ab505ef6"
     },
     "devDependencies": {
