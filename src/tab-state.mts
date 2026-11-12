@@ -11,6 +11,7 @@ export interface TabState {
   currentUrlFocusMs: number
   lastTitle: string
   previousUrl: string | null
+  previousUrlShownAtMs: number | null
 }
 
 export interface NewTabStateFields {
@@ -34,6 +35,7 @@ export function newTabState({ sessionId, windowId, shownAtMs, focused, url, titl
     currentUrlFocusMs: 0,
     lastTitle: title,
     previousUrl: null,
+    previousUrlShownAtMs: null,
   }
 }
 

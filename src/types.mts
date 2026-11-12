@@ -9,10 +9,6 @@ export type PageEventType =
   | 'tab_close'
   | 'window_close'
   | 'click'
-  | 'link_follow'
-  | 'link_follow_end'
-
-export type EventTypeSwitch = Exclude<PageEventType, 'link_follow_end'>
 
 export type ClickType = 'primary' | 'middle' | 'right' | 'other'
 
@@ -60,24 +56,13 @@ export interface ClickMessage {
   claim?: ClickClaim
 }
 
-export interface LinkFollowTotalsMessage {
-  messageType: 'linkFollowTotals'
-}
-
-export interface LinkFollowTotal {
-  click_id: string
-  shown: boolean
-  total_focus_duration_ms: number
-}
-
 export interface REXPageEventsConfiguration {
   enabled: boolean
   filter_lists?: string[]
   allow_lists?: string[]
   allow_all?: boolean
   domain_only_lists?: string[]
-  event_types?: Partial<Record<EventTypeSwitch, boolean>>
+  event_types?: Partial<Record<PageEventType, boolean>>
   hidden_link_mode?: HiddenLinkMode
   scroll_pause_delay?: number
-  link_follow_match_window?: number
 }
