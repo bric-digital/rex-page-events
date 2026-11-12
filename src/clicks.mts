@@ -4,8 +4,11 @@ const LINK_TEXT_LIMIT = 200
 const PRIMARY_BUTTON = 0
 const RIGHT_BUTTON = 2
 
+export type ClickSentListener = (message: ClickMessage) => void
+
 const clickIds = new WeakMap<Event, string>()
 const pendingClaims = new Map<string, ClickClaim>()
+const clickSentListeners: ClickSentListener[] = []
 
 const MODIFIER_FLAGS: [ModifierKey, 'shiftKey' | 'ctrlKey' | 'altKey' | 'metaKey'][] = [
   ['shift', 'shiftKey'],
@@ -111,6 +114,28 @@ export function claimClick(clickId: string, claim: ClickClaim = {}): void {
   pendingClaims.set(clickId, { ...pendingClaims.get(clickId), ...claim })
 }
 
+export function onClickSent(listener: ClickSentListener): () => void {
+  clickSentListeners.push(listener)
+
+  return () => {
+    const index = clickSentListeners.indexOf(listener)
+
+    if (index !== -1) {
+      clickSentListeners.splice(index, 1)
+    }
+  }
+}
+
+function reportClickSent(message: ClickMessage): void {
+  for (const listener of [...clickSentListeners]) {
+    try {
+      listener(message)
+    } catch (error: unknown) {
+      console.warn('[rex-page-events] click listener failed', error)
+    }
+  }
+}
+
 function withClaim(message: ClickMessage): ClickMessage {
   const claim = pendingClaims.get(message.click_id)
 
@@ -129,7 +154,11 @@ function sendOnceDeferred(send: (message: ClickMessage) => void, message: ClickM
 
     sent = true
     view.removeEventListener('pagehide', sendNow)
-    send(withClaim(message))
+
+    const sentMessage = withClaim(message)
+
+    send(sentMessage)
+    reportClickSent(sentMessage)
   }
 
   setTimeout(sendNow, 0)

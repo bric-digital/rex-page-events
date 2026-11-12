@@ -338,6 +338,21 @@ test.describe('click records', () => {
       expect('destination_url' in clicks[0]).toBe(false)
     })
 
+    test('a listener given to onClickSent receives each click message once, with its claim, as it is sent', async ({ context, serviceWorker }) => {
+      await startModule(serviceWorker)
+
+      const { page } = await openTestPage(context, CLAIMABLE_LINK.replace('/destination"', '/destination" target="_blank"'))
+      await page.click('#link')
+
+      const clicks = await settledClicks(page, serviceWorker)
+      const sent = JSON.parse(await page.getAttribute('html', 'data-sent-clicks'))
+
+      expect(clicks.length).toBe(1)
+      expect(sent.length).toBe(1)
+      expect(sent[0].click_id).toBe(clicks[0].click_id)
+      expect(sent[0].claim).toEqual({ destination_url: CLAIMED_DESTINATION })
+    })
+
     test('a click outside a claimable area carries no claim', async ({ context, serviceWorker }) => {
       await startModule(serviceWorker)
 
