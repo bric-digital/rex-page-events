@@ -69,10 +69,6 @@ import {
   type REXPageEventsConfiguration,
 } from './types.mjs'
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 const EVENT_NAME = 'rex-page-event'
 const URL_ACTIVE_EVENT_NAME = 'rex-page-url-active' as const
 const LOG_PREFIX = '[rex-page-events]'
@@ -95,23 +91,16 @@ const DEFAULT_EVENT_TYPES: Record<EventTypeSwitch, boolean> = {
   link_follow: false,
 }
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface TabState {
   sessionId: string
   windowId: number
   openedAtMs: number
   lastFocusAtMs: number | null
   focusDurationMs: number
-  // Per-URL-segment accounting. `currentUrl` is the URL presently showing in the tab;
-  // the segment resets on every tab_url_change (and mints fresh at tab_open).
   currentUrl: string
   currentUrlShownAtMs: number
   currentUrlFocusMs: number
   lastTitle: string
-  // URL that preceded currentUrl in this tab, if any; emitted as `previous_url`.
   priorUrl: string | null
 }
 
@@ -125,12 +114,6 @@ interface RedactionResult {
 
 export type UrlActiveListener = (event: RexPageUrlActiveEvent) => void
 
-// ---------------------------------------------------------------------------
-// URL-active subscriptions for other service-worker modules: rex-history finds
-// `subscribeUrlActive` on the global object instead of importing this module.
-// `subscribeUrlActive` returns a function that ends the subscription.
-// ---------------------------------------------------------------------------
-
 const urlActiveListeners: Set<UrlActiveListener> = new Set()
 
 export function subscribeUrlActive(listener: UrlActiveListener): () => void {
@@ -143,20 +126,12 @@ export function subscribeUrlActive(listener: UrlActiveListener): () => void {
 // @ts-expect-error: __rexPageEventsUrlActive is not defined on the service worker's global object
 self.__rexPageEventsUrlActive = { subscribe: subscribeUrlActive }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function extractHostname(url: string): string {
   try {
     return new URL(url).hostname
   } catch {
     return ''
   }
-}
-
-function makeSessionId(): string {
-  return crypto.randomUUID()
 }
 
 function isOnTheWayToDestination(follow: OpenFollow, url: string): boolean {
@@ -177,10 +152,6 @@ function tabStateWithoutTab(sessionId: string, windowId: number, shownAtMs: numb
     priorUrl: null,
   }
 }
-
-// ---------------------------------------------------------------------------
-// Module
-// ---------------------------------------------------------------------------
 
 class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   config: REXPageEventsConfiguration | null = null
@@ -254,17 +225,17 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     sender: chrome.runtime.MessageSender,
     sendResponse: (response: unknown) => void
   ): boolean {
-    if (message && message.messageType === 'pageClick') {
+    if (message.messageType === 'pageClick') {
       this.enqueue(() => this.recordClick(message, sender))
       sendResponse({ success: true })
       return true
     }
-    if (message && message.messageType === 'pageEvent') {
+    if (message.messageType === 'pageEvent') {
       this.enqueue(() => this.recordPageEvent(message, sender))
       sendResponse({ success: true })
       return true
     }
-    if (message && message.messageType === 'linkFollowTotals') {
+    if (message.messageType === 'linkFollowTotals') {
       this.enqueue(async () => {
         sendResponse(this.linkFollowTotals(Date.now()))
       })
@@ -280,10 +251,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       total_focus_duration_ms: this.timeInFrontOf(follow, now),
     }))
   }
-
-  // -------------------------------------------------------------------------
-  // Chrome listener registration
-  // -------------------------------------------------------------------------
 
   private registerChromeListeners() {
     if (this.listenersRegistered) {
@@ -314,28 +281,18 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       this.enqueue(() => this.onTabActivated(activeInfo.tabId, activeInfo.windowId))
     })
 
-    if (chrome.windows !== undefined) {
-      if (chrome.windows.onCreated !== undefined) {
-        chrome.windows.onCreated.addListener((window) => {
-          this.enqueue(() => this.onWindowCreated(window))
-        })
-      }
-      if (chrome.windows.onRemoved !== undefined) {
-        chrome.windows.onRemoved.addListener((windowId) => {
-          this.enqueue(() => this.onWindowRemoved(windowId))
-        })
-      }
-      if (chrome.windows.onFocusChanged !== undefined) {
-        chrome.windows.onFocusChanged.addListener((windowId) => {
-          this.enqueue(() => this.onWindowFocusChanged(windowId))
-        })
-      }
-    }
-  }
+    chrome.windows.onCreated.addListener((window) => {
+      this.enqueue(() => this.onWindowCreated(window))
+    })
 
-  // -------------------------------------------------------------------------
-  // Event handlers
-  // -------------------------------------------------------------------------
+    chrome.windows.onRemoved.addListener((windowId) => {
+      this.enqueue(() => this.onWindowRemoved(windowId))
+    })
+
+    chrome.windows.onFocusChanged.addListener((windowId) => {
+      this.enqueue(() => this.onWindowFocusChanged(windowId))
+    })
+  }
 
   private async onWindowCreated(window: chrome.windows.Window) {
     if (window.id === undefined || !this.isEventTypeOn('link_follow')) {
@@ -359,7 +316,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const title = tab.title || ''
 
     const state: TabState = {
-      sessionId: makeSessionId(),
+      sessionId: crypto.randomUUID(),
       windowId: tab.windowId,
       openedAtMs: now,
       lastFocusAtMs: tab.active ? now : null,
@@ -372,8 +329,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
     this.tabState.set(tab.id, state)
 
-    // When Chrome reports an opener tab, add the opener's current URL, redacted
-    // with the same rules as `url`.
     const extras: Record<string, unknown> = {}
     if (tab.openerTabId !== undefined) {
       extras.opener_tab_id = tab.openerTabId
@@ -386,7 +341,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
 
     await this.emit('tab_open', state, tab.id, url, title, now, extras)
-    // Announces the URL-active record, with the raw URL, to in-process subscribers.
     this.deliverUrlActive(state, tab.id, url, now)
 
     await this.resolveNewTabFollow(tab, tab.id, now)
@@ -401,13 +355,10 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const now = Date.now()
     const state = this.tabState.get(tabId) ?? this.backfillTabState(tabId, tab, now)
 
-    // Flush the outgoing segment. If the tab is currently focused, add the open
-    // focus fragment to the segment counter first so url_focus_duration_ms is accurate.
     if (state.lastFocusAtMs !== null) {
       const focusFragment = now - state.lastFocusAtMs
       state.focusDurationMs += focusFragment
       state.currentUrlFocusMs += focusFragment
-      // Re-arm lastFocusAtMs so the new segment gets credit for ongoing focus.
       state.lastFocusAtMs = now
     }
 
@@ -416,7 +367,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const urlFocusDurationMs = state.currentUrlFocusMs
     const urlDwellMs = now - state.currentUrlShownAtMs
 
-    // Redact previous_url with the same rules as url so privacy is consistent.
     let previousUrlRedacted: string | undefined
     let previousUrlFiltered: boolean | undefined
     if (state.priorUrl !== null) {
@@ -425,9 +375,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       previousUrlFiltered = priorRedaction.filtered
     }
 
-    // Emit the segment-close event. Payload describes the OUTGOING URL; url_shown_at
-    // is the outgoing segment's start. `previous_url` is the URL that preceded the
-    // outgoing one in this tab (two hops of history), if any.
     await this.emit(
       'tab_url_change',
       state,
@@ -451,14 +398,12 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       })
     }
 
-    // Reset segment state for the new URL.
     state.priorUrl = outgoingUrl
     state.currentUrl = newUrl
     state.currentUrlShownAtMs = now
     state.currentUrlFocusMs = 0
     state.lastTitle = tab.title || ''
 
-    // Announce the new URL so sibling modules can link.
     this.deliverUrlActive(state, tabId, newUrl, now)
 
     await this.saveTabState()
@@ -477,7 +422,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
 
-    // Finalize focus: if currently focused, close the fragment into BOTH counters.
     if (state.lastFocusAtMs !== null) {
       const fragment = now - state.lastFocusAtMs
       state.focusDurationMs += fragment
@@ -516,7 +460,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
     const now = Date.now()
 
-    // Blur every other tab in the same window that was focused.
     for (const [otherTabId, otherState] of this.tabState.entries()) {
       if (otherTabId !== tabId && otherState.windowId === windowId && otherState.lastFocusAtMs !== null) {
         const fragment = now - otherState.lastFocusAtMs
@@ -544,7 +487,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     const now = Date.now()
     const windowLost = windowId === chrome.windows.WINDOW_ID_NONE
 
-    // Blur every focused tab outside the window that now has focus; when no window has focus, every focused tab.
     for (const [tabId, state] of this.tabState.entries()) {
       if (state.lastFocusAtMs !== null && (windowLost || state.windowId !== windowId)) {
         const fragment = now - state.lastFocusAtMs
@@ -574,8 +516,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       return
     }
     const now = Date.now()
-    // window_close is window-level; no tab context.
-    const synthetic = tabStateWithoutTab(makeSessionId(), windowId, now)
+    const synthetic = tabStateWithoutTab(crypto.randomUUID(), windowId, now)
     await this.emit('window_close', synthetic, undefined, '', '', now, { window_id: windowId })
   }
 
@@ -593,10 +534,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
 
     const state = this.tabState.get(tabId) ?? this.backfillTabState(tabId, sender.tab, now)
 
-    // Content-script events describe the CURRENT URL. If the URL the page reports
-    // differs from the tab-state's currentUrl (rare but possible on very fast
-    // same-document navigations or SPA fragment changes), leave the tab state
-    // untouched — the authoritative URL source is chrome.tabs.onUpdated.
     state.lastTitle = title
 
     const extras: Record<string, unknown> = {}
@@ -690,10 +627,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   ): Promise<FilterListLookup | null> {
     return revealsOrigin(mode, claimed, redaction) ? this.lookUpFilterLists(address) : Promise.resolve(null)
   }
-
-  // -------------------------------------------------------------------------
-  // Link following
-  // -------------------------------------------------------------------------
 
   private async startPendingFollow(
     message: ClickMessage,
@@ -1028,10 +961,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       })
   }
 
-  // -------------------------------------------------------------------------
-  // Emission + redaction
-  // -------------------------------------------------------------------------
-
   private async emit(
     eventType: PageEventType,
     state: TabState,
@@ -1094,7 +1023,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
       url_shown_at: urlShownAtMs,
     }
 
-    // Always deliver to in-process subscribers.
     for (const listener of urlActiveListeners) {
       try {
         listener(record)
@@ -1208,10 +1136,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     return null
   }
 
-  // -------------------------------------------------------------------------
-  // Helpers
-  // -------------------------------------------------------------------------
-
   private isEnabled(): boolean {
     return this.config !== null && this.config.enabled === true
   }
@@ -1256,7 +1180,7 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
   private backfillTabState(tabId: number, tab: chrome.tabs.Tab | undefined, now: number): TabState {
     const url = tab?.url ?? ''
     const state: TabState = {
-      sessionId: makeSessionId(),
+      sessionId: crypto.randomUUID(),
       windowId: tab?.windowId ?? -1,
       openedAtMs: now,
       lastFocusAtMs: tab?.active ? now : null,
@@ -1281,7 +1205,11 @@ function shownTimesOf(navigation: HeldNavigation): ShownTimes {
 }
 
 function linkAddressOf(message: ClickMessage): string | undefined {
-  return message.link_url === undefined ? undefined : message.claim?.destination_url ?? message.link_url
+  if (message.link_url === undefined) {
+    return undefined
+  }
+
+  return message.claim?.destination_url ?? message.link_url
 }
 
 const plugin = new REXPageEventsServiceWorkerModule()
