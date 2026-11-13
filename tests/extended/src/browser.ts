@@ -1,6 +1,6 @@
 // @ts-nocheck
 
-import rexPageEventsPlugin, { claimClick, clickIdFor } from '@bric/rex-page-events/browser'
+import rexPageEventsPlugin, { claimClick, clickIdFor, onClickSent } from '@bric/rex-page-events/browser'
 
 console.log(`Imported ${rexPageEventsPlugin} into the browser context for ${window.location.href}...`)
 
@@ -49,4 +49,11 @@ document.addEventListener('click', (event) => {
   if (target !== null) {
     noteClickId(target, clickIdFor(event))
   }
+})
+
+const sentClicks = []
+
+onClickSent((message) => {
+  sentClicks.push(message)
+  document.documentElement.setAttribute('data-sent-clicks', JSON.stringify(sentClicks))
 })

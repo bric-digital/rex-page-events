@@ -3,7 +3,6 @@
     "identifier": "rex-page-events-test",
     "page_events": {
         "enabled": true,
-        "allow_lists": ["test-localhost"],
         "sites": [{
             "id": "localhost",
             "patterns": ["localhost"],

@@ -6,18 +6,6 @@ function configWith(pageEvents) {
   return { ...BASE_CONFIG, page_events: { enabled: true, ...pageEvents } }
 }
 
-async function addListEntry(serviceWorker, listName, host, category) {
-  await serviceWorker.evaluate(async ({ listName, host, category }) => {
-    await self.createListEntry({
-      list_name: listName,
-      pattern: host,
-      pattern_type: 'host',
-      source: 'backend',
-      metadata: { category },
-    })
-  }, { listName, host, category })
-}
-
 async function openTab(serviceWorker, url) {
   return serviceWorker.evaluate(async (tabUrl) => {
     const tab = await chrome.tabs.create({ url: tabUrl })
@@ -48,17 +36,6 @@ async function start(serviceWorker, config) {
 }
 
 test.describe('Address configuration', () => {
-  test('with no allow list and no allow_all, the address is replaced', async ({ serviceWorker }) => {
-    await start(serviceWorker, configWith({}))
-
-    const tabId = await openTab(serviceWorker, 'https://example.org/hidden')
-    const record = await tabOpenRecord(serviceWorker, tabId)
-
-    expect(record.url).toBe('CATEGORY:NOT_ON_ALLOWLIST')
-    expect(record.filtered_by_list).toBe('NOT_ON_ALLOWLIST')
-    expect(record.title).toBeUndefined()
-  })
-
   test('with no allow list, the url-active feed still carries the address', async ({ serviceWorker }) => {
     await start(serviceWorker, configWith({}))
 
@@ -71,57 +48,6 @@ test.describe('Address configuration', () => {
     expect(active.url).toContain('example.org/feed')
   })
 
-  test('allow_all keeps the address', async ({ serviceWorker }) => {
-    await start(serviceWorker, configWith({ allow_all: true }))
-
-    const tabId = await openTab(serviceWorker, 'https://example.org/kept')
-    const record = await tabOpenRecord(serviceWorker, tabId)
-
-    expect(record.url).toContain('example.org/kept')
-    expect(record.filtered).toBe(false)
-  })
-
-  test('a filter list takes precedence over allow_all', async ({ serviceWorker }) => {
-    await addListEntry(serviceWorker, 'test-filter', 'example.com', 'TEST_FILTERED')
-    await start(serviceWorker, configWith({ allow_all: true, filter_lists: ['test-filter'] }))
-
-    const filteredTabId = await openTab(serviceWorker, 'https://example.com/private')
-    const filtered = await tabOpenRecord(serviceWorker, filteredTabId)
-    expect(filtered.url).toBe('CATEGORY:TEST_FILTERED')
-    expect(filtered.filtered_by_list).toBe('test-filter')
-
-    const keptTabId = await openTab(serviceWorker, 'https://example.org/public')
-    const kept = await tabOpenRecord(serviceWorker, keptTabId)
-    expect(kept.url).toContain('example.org/public')
-  })
-
-  test('a domain-only list keeps the hostname of a URL that is not allowed', async ({ serviceWorker }) => {
-    await addListEntry(serviceWorker, 'test-domain-only', 'example.net', 'TEST_DOMAIN')
-    await start(serviceWorker, configWith({ domain_only_lists: ['test-domain-only'] }))
-
-    const tabId = await openTab(serviceWorker, 'https://example.net/page')
-    const record = await tabOpenRecord(serviceWorker, tabId)
-
-    expect(record.url).toBe('example.net')
-    expect(record.title).toBe('DOMAIN ONLY')
-    expect(record.filtered_by_list).toBe('test-domain-only')
-  })
-
-  test('a domain-only list takes precedence over a filter list', async ({ serviceWorker }) => {
-    await addListEntry(serviceWorker, 'test-both-filter', 'example.edu', 'TEST_FILTERED')
-    await addListEntry(serviceWorker, 'test-both-domain-only', 'example.edu', 'TEST_DOMAIN')
-    await start(serviceWorker, configWith({
-      allow_all: true,
-      filter_lists: ['test-both-filter'],
-      domain_only_lists: ['test-both-domain-only'],
-    }))
-
-    const tabId = await openTab(serviceWorker, 'https://example.edu/page')
-    const record = await tabOpenRecord(serviceWorker, tabId)
-
-    expect(record.url).toBe('example.edu')
-    expect(record.filtered_by_list).toBe('test-both-domain-only')
-  })
 })
 
 test.describe('Event type configuration', () => {

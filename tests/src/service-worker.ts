@@ -5,7 +5,6 @@
 
 import rexCorePlugin, { REXServiceWorkerModule, registerREXModule } from '@bric/rex-core/service-worker'
 import rexPageEventsPlugin from '@bric/rex-page-events/service-worker'
-import { createListEntry } from '@bric/rex-lists'
 
 console.log(`Imported ${rexCorePlugin} into service worker context...`)
 console.log(`Imported ${rexPageEventsPlugin} into service worker context...`)
@@ -58,13 +57,5 @@ registerREXModule(testModule)
 self['rexTestPageEvents'] = rexCorePlugin
 
 console.log(`Imported ${rexTestPageEvents} into service worker context...`)
-
-createListEntry({
-  list_name: 'test-localhost',
-  pattern: 'localhost',
-  pattern_type: 'host',
-  source: 'backend',
-  metadata: { category: 'ALLOWED' },
-})
 
 rexCorePlugin.setup()

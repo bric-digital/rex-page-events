@@ -3,7 +3,8 @@ import { REXClientModule, registerREXModule } from '@bric/rex-core/browser'
 import { watchClicks } from './clicks.mjs'
 import { type ClickMessage, type PageEventMessage, type REXPageEventsConfiguration, type ScrollPosition } from './types.mjs'
 
-export { claimClick, clickIdFor } from './clicks.mjs'
+export { claimClick, clickIdFor, onClickSent } from './clicks.mjs'
+export { type ClickMessage } from './types.mjs'
 
 const DEFAULT_SCROLL_PAUSE_MS = 250
 const CONFIGURATION_TIMEOUT_MS = 10000
@@ -27,12 +28,6 @@ function scrollPosition(): ScrollPosition {
 
 function waitForConfiguration(): Promise<Record<string, unknown> | undefined> {
   return chrome.runtime.sendMessage({ messageType: 'waitForConfiguration', event: { timeout: CONFIGURATION_TIMEOUT_MS } })
-}
-
-function isDebugOn(configuration: Record<string, unknown> | undefined): boolean {
-  const pageEvents = configuration?.page_events as REXPageEventsConfiguration | undefined
-
-  return pageEvents?.debug === true
 }
 
 function readScrollPauseMs(configuration: Record<string, unknown> | undefined): number {
@@ -81,10 +76,6 @@ class REXPageEventsModule extends REXClientModule {
 
     waitForConfiguration()
       .then((configuration) => {
-        if (isDebugOn(configuration)) {
-          console.log('[rex-page-events] browser setup')
-        }
-
         this.scrollPauseMs = readScrollPauseMs(configuration)
         this.recordLoad()
         this.recordScroll()
