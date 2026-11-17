@@ -94,7 +94,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 }
 ```
 
-**`tab_url_change`** — a **segment-flush event**: the payload describes the *outgoing* URL (so it can be linked back to the corresponding `rex-history-visit`). After this event, a new URL segment begins and a new internal `rex-page-url-active` record is delivered for the incoming URL. `previous_url` is the URL that preceded the outgoing one in this same tab; it is absent on a tab's first `tab_url_change`.
+**`tab_url_change`** — a **segment-flush event**: the payload describes the *outgoing* URL (so it can be linked back to the corresponding `rex-history-visit`). After this event, a new URL segment begins. `previous_url` is the URL that preceded the outgoing one in this same tab; it is absent on a tab's first `tab_url_change`.
 
 ```json
 {
@@ -165,9 +165,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 }
 ```
 
-The `rex-page-url-active` record this module sends to other service-worker modules (see **Linking to rex-history** below) carries the raw URL, like every record. It never leaves the extension.
-
-URL fragments are matched **exactly**: `https://a/#x` and `https://a/#y` are treated as different URLs both for event emission and for `rex-page-url-active` delivery.
+URL fragments are matched **exactly**: `https://a/#x` and `https://a/#y` are treated as different URLs for event emission.
 
 ## Event definitions
 
@@ -255,31 +253,6 @@ Known limitations:
 
 Cases where `opener_tab_id` will be **absent**: tabs opened from the address bar, bookmarks, the new-tab button, session restore, an external application, or any flow where Chrome itself does not set `openerTabId`.
 
-## Linking to rex-history
-
-`rex-page-events` records focus dwell on a per-tab basis, but a tab can visit many URLs over its lifetime. To give analysts a way to attach focus time to a specific `rex-history-visit` record, this module announces each address a tab shows to the other service-worker modules, through rex-core's message handler:
-
-```ts
-rexCorePlugin.handleMessage({ messageType: 'pageUrlActive', event: record }, null, () => undefined)
-```
-
-`event` is a `RexPageUrlActiveEvent` from `@bric/rex-types`, unchanged from earlier versions:
-
-```ts
-interface RexPageUrlActiveEvent {
-  name: 'rex-page-url-active'
-  tab_id: number
-  window_id: number
-  session_id: string
-  url: string           // raw URL
-  url_shown_at: number  // same timestamp this module reports on every event
-}
-```
-
-A record is sent at `tab_open` and at every `tab_url_change`. rex-core offers the message to every registered module's `handleMessage`. A module that wants the records, such as `rex-history`, handles this message type only: it takes `message.event`, calls `sendResponse`, and returns `true`. Every other module returns `false` for it, as for any message it does not know. A sibling module can keep a small `(url, url_shown_at) → { tab_id, window_id, session_id }` lookup table and enrich its own outgoing records when a URL/time pair matches.
-
-The record carries the raw address. It stays inside the service worker: it is a message between modules, not a record on the event bus, so collectors never receive it. Because each record is sent when it happens, delivery does not depend on the order modules are set up in. A module that throws while handling it does not stop this module saving its tab state.
-
 ## Configuration
 
 This module reads from the `page_events` section of the backend config.
@@ -305,16 +278,6 @@ This module reads from the `page_events` section of the backend config.
 
 This records every event type except `scroll`. Lists that hide addresses are configured in `rex-page-events-redaction`'s `page_events_redaction` section.
 
-## Coupling model
-
-This module and `rex-history` use **two different kinds of coupling on purpose.**
-
-**Code: loosely coupled.** Neither module imports the other. Neither lists the other in `package.json` dependencies. The only connection is a message: `rex-page-events` sends `pageUrlActive` through rex-core's message handler, and `rex-history` handles it. If `rex-history` is not in the extension, no module handles the message and nothing is linked; if `rex-page-events` is not, no message is sent and `rex-history` proceeds without linkage fields. Either module can ship, update, or be removed independently. The shared surface is the `pageUrlActive` message and the `RexPageUrlActiveEvent` type in `@bric/rex-types`.
-
-**Data: tightly coupled.** Once both modules are present, every `rex-history-visit` record that matches a buffered `rex-page-url-active` gets `tab_id`, `window_id`, `session_id`, and `page_events_url_shown_at` stapled onto it. A visit's `session_id` means exactly the same thing as the page-event's `session_id` for the same tab lifetime — analysts can treat the two streams as one correlated dataset, joining on `session_id` for exact-within-tab analysis or on `(url, page_events_url_shown_at ≈ visit_time)` for visit-level analysis.
-
-Put simply: loosely coupled in code, so each module is useful on its own, and tightly coupled in data, so the output can be analyzed as a single story.
-
 ## Adopting this version
 
 For an extension that updates from an earlier version of this module (before the split into rex-page-events, rex-page-events-redaction and rex-link-follow).
@@ -333,11 +296,11 @@ For an extension that updates from an earlier version of this module (before the
 - `link_follow` and `link_follow_end` no longer carry `session_id` or `url_shown_at`; join a follow to its `click` record on `click_id`. `link_follow_end` gains `is_result`.
 - `linkFollowTotals` is answered by rex-link-follow.
 
-**rex-history.** Visits link to tabs only when the extension has the rex-history version that handles `pageUrlActive`. An older rex-history with this version of rex-page-events, or an older rex-page-events with that rex-history, links nothing and logs no error, so update both together. With this rex-page-events and an older rex-history, rex-core prints each unhandled url-active message, raw address included, to the service-worker console. The console stays on the device.
+**rex-history.** This version sends no `pageUrlActive` message, so no module links history visits to tabs through this module. Remove any handler for `pageUrlActive` from an extension's own modules.
 
-**Removed.** The `debug` setting; the `__rexPageEventsUrlActive` global and `subscribeUrlActive`; the `timestamp` field, a duplicate of `date`, which keeps the same value.
+**Removed.** The `debug` setting; the `pageUrlActive` message and the `rex-page-url-active` record, and the earlier `__rexPageEventsUrlActive` global and `subscribeUrlActive`; the `timestamp` field, a duplicate of `date`, which keeps the same value.
 
-**An extension that imports only the browser part.** Nothing changes. Its page and click messages reach no service-worker module, before and after this version, and rex-history links no tabs there. To record page events, it would also import the service-worker part, and then the redaction processor.
+**An extension that imports only the browser part.** Nothing changes. Its page and click messages reach no service-worker module, before and after this version. To record page events, it would also import the service-worker part, and then the redaction processor.
 
 ## Installation
 
@@ -369,7 +332,7 @@ await import('@bric/rex-page-events/service-worker')
 
 - `./extension` — Extension UI context (empty; no UI)
 - `./browser` — Content-script listeners that forward DOM events to the service worker, and `clickIdFor`, `claimClick` and `onClickSent`
-- `./service-worker` — Authoritative tab/window lifecycle and event dispatch, and the `pageUrlActive` message
+- `./service-worker` — Authoritative tab/window lifecycle and event dispatch
 
 ## Testing
 
@@ -387,13 +350,13 @@ Run one set with `npx playwright test --project=chromium` or `--project=extended
 
 The `extended` specs:
 
-- `service-worker.spec.ts`: verifies tab_open, tab_url_change (describing the outgoing URL), tab_close lifetime stats, that url-active records reach other modules through rex-core and no global is installed, that a module throwing on one does not stop tab state being saved, that no url-active record reaches the event bus, and that `enabled: false` suppresses events.
+- `service-worker.spec.ts`: verifies tab_open, tab_url_change (describing the outgoing URL), tab_close lifetime stats, that opening a tab and changing its address sends no `pageUrlActive` message, and that `enabled: false` suppresses events.
 - `window-focus.spec.ts`: verifies that focusing another window blurs the tab in the window that lost focus and focuses the active tab of the one that gained it, and that a window regaining focus after the browser lost it restarts its active tab's focus. Playwright's Chromium fires no `windows.onFocusChanged`, so these tests pass the module the event Chrome sends; a real window switch is checked by hand.
 - `browser.spec.ts`: loads the browser part through rex-core's own injection and verifies page_hide's `persisted` flag on leaving a page the browser caches and one it does not, `load` when the script arrives before and after load, `scroll` at the start, after a pause, on leaving and on return from the bfcache, and the order of `scroll`, `page_hide` and `tab_close` when a tab is closed. Tests that need the bfcache set the fixture option `backForwardCache`, because Playwright otherwise starts Chromium with it disabled. It also verifies that moving focus into a frame inside a page and back records no focus change.
 - `service-worker-restart.spec.ts`: verifies that tab state survives Chrome stopping and restarting the idle service worker.
 - `slow-handler.spec.ts`: verifies that a handler that never finishes logs a warning, and that handlers that finish do not.
 - `clicks.spec.ts`: verifies click records, click IDs and claims, and that `onClickSent` reports each click message once, with its claim.
-- `configuration.spec.ts`: verifies the event type switches, and that the url-active feed carries the address.
+- `configuration.spec.ts`: verifies the event type switches.
 
 Add coverage here when changing behavior.
 

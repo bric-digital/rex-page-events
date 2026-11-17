@@ -27,36 +27,14 @@ test.describe('REX Page Events', () => {
     expect(identifier).toEqual('i-am-rex')
   })
 
-  test('url-active records reach a registered module through rex-core, and no global is installed', async ({ serviceWorker }) => {
+  test('opening a tab and changing its address sends no pageUrlActive message', async ({ serviceWorker }) => {
     await loadConfig(serviceWorker, BASE_CONFIG)
     await waitForPageEventsConfig(serviceWorker)
     await resetCaptured(serviceWorker)
 
     const tabId = await serviceWorker.evaluate(async () => {
-      const tab = await chrome.tabs.create({ url: 'https://example.org/message' })
-      return tab.id
-    })
-
-    await expect.poll(async () => {
-      const { urlActive } = await getCaptured(serviceWorker)
-      return urlActive.some((r) => r.tab_id === tabId)
-    }, { timeout: 5000 }).toBe(true)
-
-    const globalFeed = await serviceWorker.evaluate(() => globalThis.__rexPageEventsUrlActive)
-
-    expect(globalFeed).toBeUndefined()
-  })
-
-  test('a module that throws on a url-active message does not stop tab state being saved', async ({ serviceWorker }) => {
-    await loadConfig(serviceWorker, BASE_CONFIG)
-    await waitForPageEventsConfig(serviceWorker)
-    await resetCaptured(serviceWorker)
-    await serviceWorker.evaluate(() => {
-      self.__throwOnUrlActive = true
-    })
-
-    const tabId = await serviceWorker.evaluate(async () => {
-      const tab = await chrome.tabs.create({ url: 'data:text/html,first', active: false })
+      const tab = await chrome.tabs.create({ url: 'https://example.org/first' })
+      await chrome.tabs.update(tab.id, { url: 'https://example.org/second' })
       return tab.id
     })
 
@@ -65,14 +43,12 @@ test.describe('REX Page Events', () => {
       return events.some((e) => e.event_type === 'tab_url_change' && e.tab_id === tabId)
     }, { timeout: 5000 }).toBe(true)
 
-    await expect.poll(() => serviceWorker.evaluate(async (id) => {
-      const saved = await chrome.storage.session.get('rexPageEventsTabState')
-      const entry = (saved.rexPageEventsTabState ?? []).find(([savedTabId]) => savedTabId === id)
-      return entry?.[1].currentUrl ?? null
-    }, tabId), { timeout: 5000 }).toBe('data:text/html,first')
+    const { urlActive } = await getCaptured(serviceWorker)
+
+    expect(urlActive).toEqual([])
   })
 
-  test('creating a tab emits tab_open and delivers url-active', async ({ serviceWorker }) => {
+  test('creating a tab emits tab_open', async ({ serviceWorker }) => {
     await loadConfig(serviceWorker, BASE_CONFIG)
     await waitForPageEventsConfig(serviceWorker)
     await resetCaptured(serviceWorker)
@@ -87,16 +63,11 @@ test.describe('REX Page Events', () => {
       return events.filter((e) => e.event_type === 'tab_open' && e.tab_id === tabId).length
     }, { timeout: 5000 }).toBeGreaterThanOrEqual(1)
 
-    const { events, urlActive } = await getCaptured(serviceWorker)
+    const { events } = await getCaptured(serviceWorker)
     const tabOpen = events.find((e) => e.event_type === 'tab_open' && e.tab_id === tabId)
     expect(tabOpen.name).toBe('rex-page-event')
     expect(tabOpen.session_id).toBeTruthy()
     expect(tabOpen.window_id).toBeGreaterThanOrEqual(0)
-
-    const active = urlActive.find((r) => r.tab_id === tabId)
-    expect(active).toBeTruthy()
-    expect(active.name).toBe('rex-page-url-active')
-    expect(active.session_id).toBe(tabOpen.session_id)
   })
 
   test('url change emits tab_url_change describing outgoing URL', async ({ serviceWorker }) => {
@@ -160,27 +131,6 @@ test.describe('REX Page Events', () => {
     expect(typeof close.tab_lifetime_ms).toBe('number')
     expect(close.tab_lifetime_ms).toBeGreaterThan(0)
     expect(typeof close.focus_duration_ms).toBe('number')
-  })
-
-  test('with debug on, no rex-page-url-active record reaches the event bus', async ({ serviceWorker }) => {
-    await loadConfig(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, allow_all: true, debug: true } })
-    await waitForPageEventsConfig(serviceWorker)
-    await resetCaptured(serviceWorker)
-
-    const tabId = await serviceWorker.evaluate(async () => {
-      const tab = await chrome.tabs.create({ url: 'https://example.org/debug' })
-      return tab.id
-    })
-
-    await expect.poll(async () => {
-      const { events, urlActive } = await getCaptured(serviceWorker)
-      const opened = events.some((e) => e.event_type === 'tab_open' && e.tab_id === tabId)
-      const delivered = urlActive.some((r) => r.tab_id === tabId)
-      return opened && delivered
-    }, { timeout: 5000 }).toBe(true)
-
-    const { events } = await getCaptured(serviceWorker)
-    expect(events.filter((e) => e.name === 'rex-page-url-active')).toHaveLength(0)
   })
 
   test('enabled: false from the start suppresses events', async ({ serviceWorker }) => {
