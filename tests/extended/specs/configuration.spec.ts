@@ -35,21 +35,6 @@ async function start(serviceWorker, config) {
   await resetCaptured(serviceWorker)
 }
 
-test.describe('Address configuration', () => {
-  test('with no allow list, the url-active feed still carries the address', async ({ serviceWorker }) => {
-    await start(serviceWorker, configWith({}))
-
-    const tabId = await openTab(serviceWorker, 'https://example.org/feed')
-    await tabOpenRecord(serviceWorker, tabId)
-
-    const active = await serviceWorker.evaluate((id) => {
-      return self.__capturedUrlActive.find((r) => r.tab_id === id)
-    }, tabId)
-    expect(active.url).toContain('example.org/feed')
-  })
-
-})
-
 test.describe('Event type configuration', () => {
   test('an event type set to false is not recorded, and the others still are', async ({ serviceWorker }) => {
     await start(serviceWorker, configWith({ allow_all: true, event_types: { tab_open: false } }))

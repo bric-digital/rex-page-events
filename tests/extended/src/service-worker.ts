@@ -29,22 +29,7 @@ class EventCaptureModule extends REXServiceWorkerModule {
   }
 }
 
-class ThrowingUrlActiveModule extends REXServiceWorkerModule {
-  moduleName() {
-    return 'ThrowingUrlActive'
-  }
-  setup() { /* no-op */ }
-  handleMessage(message) {
-    if (message.messageType === 'pageUrlActive' && self['__throwOnUrlActive'] === true) {
-      throw new Error('test module throws on url-active')
-    }
-
-    return false
-  }
-}
-
 registerREXModule(new EventCaptureModule())
-registerREXModule(new ThrowingUrlActiveModule())
 
 self['rexCorePlugin'] = rexCorePlugin
 self['rexPageEventsPlugin'] = rexPageEventsPlugin

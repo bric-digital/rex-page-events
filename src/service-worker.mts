@@ -4,10 +4,8 @@ import rexCorePlugin, {
   registerREXModule,
   dispatchEvent,
 } from '@bric/rex-core/service-worker'
-import { type RexPageUrlActiveEvent } from '@bric/rex-types/types'
 
 import { type TabState, loadTabState, newTabState, saveTabState } from './tab-state.mjs'
-import { deliverUrlActive } from './url-active.mjs'
 import {
   type ClickMessage,
   type PageEventMessage,
@@ -16,7 +14,6 @@ import {
 } from './types.mjs'
 
 const EVENT_NAME = 'rex-page-event'
-const URL_ACTIVE_EVENT_NAME = 'rex-page-url-active' as const
 const LOG_PREFIX = '[rex-page-events]'
 const CONFIGURATION_TIMEOUT_MS = 10000
 const SLOW_HANDLER_WARNING_MS = 10000
@@ -52,17 +49,6 @@ function shownAtMsOfPage(state: TabState, pageUrl: string): number {
   }
 
   return state.currentUrlShownAtMs
-}
-
-function urlActiveRecordOf(state: TabState, tabId: number, url: string, urlShownAtMs: number): RexPageUrlActiveEvent {
-  return {
-    name: URL_ACTIVE_EVENT_NAME,
-    tab_id: tabId,
-    window_id: state.windowId,
-    session_id: state.sessionId,
-    url,
-    url_shown_at: urlShownAtMs,
-  }
 }
 
 class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
@@ -210,7 +196,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     }
 
     await this.emit({ eventType: 'tab_open', state, tabId: tab.id, url, title, dateMs: nowMs, extras })
-    deliverUrlActive(urlActiveRecordOf(state, tab.id, url, nowMs))
 
     await this.storeTabState()
   }
@@ -255,8 +240,6 @@ class REXPageEventsServiceWorkerModule extends REXServiceWorkerModule {
     state.currentUrlShownAtMs = nowMs
     state.currentUrlFocusMs = 0
     state.lastTitle = tab.title || ''
-
-    deliverUrlActive(urlActiveRecordOf(state, tabId, newUrl, nowMs))
 
     await this.storeTabState()
   }
