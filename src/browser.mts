@@ -6,7 +6,7 @@ import { type ClickMessage, type PageEventMessage, type REXPageEventsConfigurati
 export { claimClick, clickIdFor, onClickSent } from './clicks.mjs'
 export { type ClickMessage } from './types.mjs'
 
-const DEFAULT_SCROLL_PAUSE_MS = 250
+const DEFAULT_SCROLL_PAUSE_MS = 100
 const CONFIGURATION_TIMEOUT_MS = 10000
 
 function loadStartTime(): number {
@@ -24,6 +24,10 @@ function scrollPosition(): ScrollPosition {
     document_height: document.documentElement.scrollHeight,
     document_width: document.documentElement.scrollWidth,
   }
+}
+
+function browserSignalsScrollEnd(): boolean {
+  return 'onscrollend' in window
 }
 
 function waitForConfiguration(): Promise<Record<string, unknown> | undefined> {
@@ -44,6 +48,7 @@ function readScrollPauseMs(configuration: Record<string, unknown> | undefined): 
 class REXPageEventsModule extends REXClientModule {
   private scrollTimer: ReturnType<typeof setTimeout> | null = null
   private scrollPauseMs: number | null = null
+  private lastScrollRecordAt = 0
   toString(): string {
     return 'REXPageEventsModule'
   }
@@ -104,11 +109,19 @@ class REXPageEventsModule extends REXClientModule {
   }
 
   private watchScroll(): void {
-    window.addEventListener('scroll', () => {
-      if (this.scrollPauseMs !== null) {
-        this.scheduleScroll(this.scrollPauseMs)
-      }
-    })
+    if (browserSignalsScrollEnd()) {
+      window.addEventListener('scrollend', () => {
+        if (this.scrollPauseMs !== null) {
+          this.scheduleScroll(this.msUntilScrollRecordAllowed(this.scrollPauseMs))
+        }
+      })
+    } else {
+      window.addEventListener('scroll', () => {
+        if (this.scrollPauseMs !== null) {
+          this.scheduleScroll(this.scrollPauseMs)
+        }
+      })
+    }
 
     window.addEventListener('pagehide', () => {
       this.flushScroll()
@@ -132,6 +145,10 @@ class REXPageEventsModule extends REXClientModule {
     }, pauseMs)
   }
 
+  private msUntilScrollRecordAllowed(minGapMs: number): number {
+    return Math.max(0, this.lastScrollRecordAt + minGapMs - Date.now())
+  }
+
   private flushScroll(): void {
     if (this.scrollTimer === null) {
       return
@@ -143,12 +160,13 @@ class REXPageEventsModule extends REXClientModule {
   }
 
   private recordScroll(): void {
+    this.lastScrollRecordAt = Date.now()
     this.send({
       messageType: 'pageEvent',
       event_type: 'scroll',
       url: location.href,
       title: document.title,
-      timestamp: Date.now(),
+      timestamp: this.lastScrollRecordAt,
       scroll_position: scrollPosition(),
     })
   }

@@ -1,5 +1,6 @@
 // @ts-nocheck
 
+import './without-scroll-end'
 import rexPageEventsPlugin, { claimClick, clickIdFor, onClickSent } from '@bric/rex-page-events/browser'
 
 console.log(`Imported ${rexPageEventsPlugin} into the browser context for ${window.location.href}...`)

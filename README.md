@@ -30,7 +30,7 @@ Every event shares the name `rex-page-event` and is distinguished by `event_type
 | `tab_close` | `chrome.tabs.onRemoved` | Carries `tab_lifetime_ms` and `focus_duration_ms` |
 | `window_close` | `chrome.windows.onRemoved` | Emitted once per window close |
 | `load` | Content-script `window.load`, or Navigation Timing when the script arrives after load | Once per document, at the time `load` began |
-| `scroll` | Content-script `window.scroll`, after a pause of `scroll_pause_delay` (250 ms by default) | Also at the start, on leaving during a pause, and on return from the bfcache |
+| `scroll` | Content-script `window.scrollend`, no closer than `scroll_pause_delay` (100 ms by default) to the last record; without `scrollend`, `window.scroll` after a pause of `scroll_pause_delay` | Also at the start, on leaving during a pause, and on return from the bfcache |
 | `click` | Content-script `click`, `contextmenu` and `auxclick`, in the capture phase | One record per button press, on a link or not; carries `click_type`, `modifier_keys` and link metadata |
 
 ### Where each field comes from
@@ -190,11 +190,12 @@ BRIC defines load, unload, scroll and click as follows. Each definition names it
 
 ### scroll
 
-- **Definition:** the page's own scroll position once scrolling has paused for `scroll_pause_delay` (250 ms by default). Also recorded once configuration has arrived (the starting position), when the page is left while a record is waiting, and when the page returns from the back/forward cache.
-- **Browser event:** `scroll` on `window`, with a timer restarted on every scroll event.
+- **Definition:** the page's own scroll position once a scroll ends, recorded no sooner than `scroll_pause_delay` (100 ms by default) after the last record. A scroll that ends sooner is recorded when that gap is up, with the position at that moment. In a browser without `scrollend`, the position once scrolling has paused for `scroll_pause_delay`. Also recorded once configuration has arrived (the starting position), when the page is left while a record is waiting, and when the page returns from the back/forward cache.
+- **Browser event:** `scrollend` on `window` where the browser supports it; otherwise `scroll` on `window`, with a timer restarted on every scroll event.
 - **Limits:**
   - Only the page's own scroll position; scrolling inside an element with its own scroll bar is not recorded.
-  - A position is recorded only after a pause or on leaving, so scrolling down and back up without pausing does not record the furthest point reached. Scroll depth is a lower bound.
+  - Each mouse wheel notch can end a scroll of its own, so fast wheel scrolling records up to one position per `scroll_pause_delay`.
+  - A position is recorded only after a scroll ends or on leaving, so scrolling down and back up without pausing does not record the furthest point reached. Scroll depth is a lower bound.
   - The `width`, `height`, `document_height` and `document_width` in `scroll_position` are as of the last `scroll` record. Resizing the window, or the page growing as content loads, makes no new record unless it moves the scroll position. Making the window taller at the bottom of a page moves the position up, and that is recorded like a scroll.
   - Scrolls made by the page or the browser, such as a jump to an anchor or a restored position, are recorded like the participant's own.
   - Scrolling before configuration arrives is not recorded. The pause is read once configuration arrives; a configuration change applies from the next page load.
@@ -263,7 +264,7 @@ This module reads from the `page_events` section of the backend config.
 |-------|------|----------|---------|-------------|
 | `enabled` | boolean | Yes | — | Enable/disable event recording. If false, no events are dispatched. |
 | `event_types` | object | No | every type `true` | Maps an `event_type` to `true` or `false`. A type set to `false` is not recorded. Types left out, and values that are not booleans, use the default. |
-| `scroll_pause_delay` | number | No | `250` | Milliseconds scrolling must pause before a `scroll` record is made. Values that are not a finite number above 0 use the default. |
+| `scroll_pause_delay` | number | No | `100` | Shortest gap in milliseconds between `scroll` records made when a scroll ends. In a browser without `scrollend`, how long scrolling must pause before a `scroll` record is made. Values that are not a finite number above 0 use the default. |
 
 ### Example
 
@@ -352,7 +353,7 @@ The `extended` specs:
 
 - `service-worker.spec.ts`: verifies tab_open, tab_url_change (describing the outgoing URL), tab_close lifetime stats, that opening a tab and changing its address sends no `pageUrlActive` message, and that `enabled: false` suppresses events.
 - `window-focus.spec.ts`: verifies that focusing another window blurs the tab in the window that lost focus and focuses the active tab of the one that gained it, and that a window regaining focus after the browser lost it restarts its active tab's focus. Playwright's Chromium fires no `windows.onFocusChanged`, so these tests pass the module the event Chrome sends; a real window switch is checked by hand.
-- `browser.spec.ts`: loads the browser part through rex-core's own injection and verifies page_hide's `persisted` flag on leaving a page the browser caches and one it does not, `load` when the script arrives before and after load, `scroll` at the start, after a pause, on leaving and on return from the bfcache, and the order of `scroll`, `page_hide` and `tab_close` when a tab is closed. Tests that need the bfcache set the fixture option `backForwardCache`, because Playwright otherwise starts Chromium with it disabled. It also verifies that moving focus into a frame inside a page and back records no focus change.
+- `browser.spec.ts`: loads the browser part through rex-core's own injection and verifies page_hide's `persisted` flag on leaving a page the browser caches and one it does not, `load` when the script arrives before and after load, `scroll` at the start, at each scroll end no closer than `scroll_pause_delay` apart, after a pause where `scrollend` is missing (pages under `/without-scroll-end/`, where the test bundle removes `window.onscrollend`), on leaving and on return from the bfcache, and the order of `scroll`, `page_hide` and `tab_close` when a tab is closed. Tests that need the bfcache set the fixture option `backForwardCache`, because Playwright otherwise starts Chromium with it disabled. It also verifies that moving focus into a frame inside a page and back records no focus change.
 - `service-worker-restart.spec.ts`: verifies that tab state survives Chrome stopping and restarting the idle service worker.
 - `slow-handler.spec.ts`: verifies that a handler that never finishes logs a warning, and that handlers that finish do not.
 - `clicks.spec.ts`: verifies click records, click IDs and claims, and that `onClickSent` reports each click message once, with its claim.
