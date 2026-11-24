@@ -17,7 +17,8 @@ async function startModule(serviceWorker, config = BASE_CONFIG) {
 async function openTestPage(context, body, options = {}) {
   pageCount += 1
 
-  const url = `${TEST_ORIGIN}/page-${pageCount}`
+  const directory = options.withoutScrollEnd === true ? '/without-scroll-end' : ''
+  const url = `${TEST_ORIGIN}${directory}/page-${pageCount}`
   const image = options.holdImage === true ? `<img src="${HELD_IMAGE_PATH}">` : ''
   const html = `<!doctype html><html><head><title>Test page ${pageCount}</title></head><body>${body}${image}</body></html>`
 
@@ -195,7 +196,27 @@ test.describe('REX Page Events in pages', () => {
     expect(scrolls[0].scroll_position.top).toBe(0)
   })
 
-  test('scrolling records one position per pause and none while it continues', async ({ context, serviceWorker }) => {
+  test('each scroll that ends records its position without waiting for a pause', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, TALL_PAGE)
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.evaluate(() => {
+      window.scrollTo(0, 500)
+    })
+    await page.waitForTimeout(150)
+    await page.evaluate(() => {
+      window.scrollTo(0, 1000)
+    })
+    await page.waitForTimeout(400)
+
+    const scrolls = await scrollsOf(serviceWorker, url)
+
+    expect(scrolls.map((event) => event.scroll_position.top)).toEqual([0, 500, 1000])
+  })
+
+  test('scroll ends in quick succession record no closer than 100 ms apart and keep the last position', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker)
 
     const { page, url } = await openTestPage(context, TALL_PAGE)
@@ -203,14 +224,63 @@ test.describe('REX Page Events in pages', () => {
     await page.waitForTimeout(SETTLE_MS)
     await page.mouse.move(200, 200)
 
-    for (let step = 0; step < 10; step += 1) {
+    for (let notch = 0; notch < 10; notch += 1) {
       await page.mouse.wheel(0, 100)
-      await page.waitForTimeout(100)
+      await page.waitForTimeout(16)
+    }
+
+    await page.waitForTimeout(500)
+
+    const pauses = (await scrollsOf(serviceWorker, url)).slice(1)
+    const gaps = pauses.slice(1).map((event, index) => event.date - pauses[index].date)
+
+    expect(pauses.length).toBeGreaterThan(0)
+    expect(pauses.length).toBeLessThan(10)
+    gaps.forEach((gap) => expect(gap).toBeGreaterThanOrEqual(100))
+    expect(pauses.at(-1).scroll_position.top).toBe((await positionOf(page)).top)
+  })
+
+  test('a configured scroll pause sets the shortest gap between scroll end records', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, allow_all: true, scroll_pause_delay: 400 } })
+
+    const { page, url } = await openTestPage(context, TALL_PAGE)
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.evaluate(() => {
+      window.scrollTo(0, 500)
+    })
+    await page.waitForTimeout(150)
+    await page.evaluate(() => {
+      window.scrollTo(0, 1000)
+    })
+    await page.waitForTimeout(100)
+
+    expect((await scrollsOf(serviceWorker, url)).map((event) => event.scroll_position.top)).toEqual([0, 500])
+
+    await page.waitForTimeout(400)
+
+    const scrolls = await scrollsOf(serviceWorker, url)
+
+    expect(scrolls.map((event) => event.scroll_position.top)).toEqual([0, 500, 1000])
+    expect(scrolls[2].date - scrolls[1].date).toBeGreaterThanOrEqual(400)
+  })
+
+  test('without scrollend, scrolling records one position per pause and none while it continues', async ({ context, serviceWorker }) => {
+    await startModule(serviceWorker)
+
+    const { page, url } = await openTestPage(context, TALL_PAGE, { withoutScrollEnd: true })
+
+    await page.waitForTimeout(SETTLE_MS)
+    await page.mouse.move(200, 200)
+
+    for (let notch = 0; notch < 10; notch += 1) {
+      await page.mouse.wheel(0, 100)
+      await page.waitForTimeout(40)
     }
 
     expect((await scrollsOf(serviceWorker, url)).length).toBe(1)
 
-    await page.waitForTimeout(500)
+    await page.waitForTimeout(300)
 
     const scrolls = await scrollsOf(serviceWorker, url)
 
@@ -219,15 +289,15 @@ test.describe('REX Page Events in pages', () => {
     expect(scrolls[1].scroll_position.top).toBeGreaterThan(0)
   })
 
-  test('a configured scroll pause delays the record until scrolling has paused that long', async ({ context, serviceWorker }) => {
+  test('without scrollend, a configured scroll pause delays the record until scrolling has paused that long', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, allow_all: true, scroll_pause_delay: 1000 } })
 
-    const { page, url } = await openTestPage(context, TALL_PAGE)
+    const { page, url } = await openTestPage(context, TALL_PAGE, { withoutScrollEnd: true })
 
     await page.waitForTimeout(SETTLE_MS)
     await page.mouse.move(200, 200)
 
-    for (let step = 0; step < 10; step += 1) {
+    for (let notch = 0; notch < 10; notch += 1) {
       await page.mouse.wheel(0, 100)
       await page.waitForTimeout(100)
     }
@@ -244,20 +314,16 @@ test.describe('REX Page Events in pages', () => {
     expect(scrolls[1].scroll_position.top).toBe((await positionOf(page)).top)
   })
 
-  test('a scroll pause that is not a number uses 250 ms', async ({ context, serviceWorker }) => {
+  test('without scrollend, a scroll pause that is not a number uses 100 ms', async ({ context, serviceWorker }) => {
     await startModule(serviceWorker, { ...BASE_CONFIG, page_events: { enabled: true, allow_all: true, scroll_pause_delay: '1000' } })
 
-    const { page, url } = await openTestPage(context, TALL_PAGE)
+    const { page, url } = await openTestPage(context, TALL_PAGE, { withoutScrollEnd: true })
 
     await page.waitForTimeout(SETTLE_MS)
-    await page.mouse.move(200, 200)
-
-    for (let step = 0; step < 10; step += 1) {
-      await page.mouse.wheel(0, 100)
-      await page.waitForTimeout(100)
-    }
-
-    await page.waitForTimeout(500)
+    await page.evaluate(() => {
+      window.scrollTo(0, 500)
+    })
+    await page.waitForTimeout(180)
 
     expect((await scrollsOf(serviceWorker, url)).length).toBe(2)
   })
